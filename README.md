@@ -25,14 +25,20 @@ npm test           # build first; headless Chrome smoke test + screenshots → s
 | Action | Touch 手机 | Desktop 电脑 |
 |---|---|---|
 | Slash 斩击 | Swipe anywhere. The stroke direction sets the cut and faster swipes do more damage. Zig-zag for combos. | Drag the mouse, or use the arrow keys |
-| Parry 招架 | When the enemy's wind-up glows, swipe **opposite** to the incoming attack. That staggers it, triggers slow-mo and opens a flurry window. | same |
+| Parry 招架 | Swipe **the way the glowing chevrons flow**. The cue only appears when the attack can be parried: gold = get ready (准备招架), cyan pulsing + "ting" = **NOW** (招架！). A clean parry pops **PARRY! 招架**, staggers the enemy, triggers slow-mo and opens a flurry window. | same |
 | Dodge 闪避 | ⟸ / ⟹ buttons. A late dodge counts as a *perfect dodge* (slow-mo). | A / D |
-| Block 格挡 | Hold 🛡️. This uses shield durability. | S / Space |
+| Block 格挡 | Hold 🛡️. This uses shield durability and shows **BLOCK 格挡**. It is safer than a parry but gives no opening. | S / Space |
 | Magic 魔法 | ✦ button when the meter is full | Q / E |
 | Pause | ❚❚ | Esc |
 
 Enemy attack types: left / right / overhead are dodgeable, blockable and parryable.
-**Sweep** (blue) cannot be dodged, so block or parry it. **Heavy** (red) breaks your guard and cannot be parried, so dodge it.
+**Sweep** (blue) cannot be dodged, so block or parry it (its cue says swipe left). **Heavy** (red) breaks your guard and cannot be parried, so dodge it.
+
+### Cues 提示 (one at a time)
+- **Parry cue**: animated glowing chevrons on screen point in the direction *you* must swipe. They appear during the wind-up and turn cyan when the parry window opens.
+- **Window open**: when the window opens, the enemy weapon flashes cyan-white and keeps glowing, an impact ring spawns at the blade tip, and you get a "ting" plus a short vibration.
+- **Unparryable (heavy)**: no chevrons. Instead you see a red ⟸ ⚠ ⟹ **闪避！DODGE · 重击无法招架** cue, and both dodge buttons pulse red when it's time.
+- **Tutorial 教程**: runs on the first fight only (`tutorialDone` in the save) and can be skipped. It covers swipe to attack → parry as shown → dodge buttons → hold shield → magic. The first time each cue appears, the game drops into slow-mo with a one-line hint (Chinese + English) until you act.
 
 ## Loop 流程
 Fight → win → XP / gold / stat points → spend points, buy or equip swords → next, tougher titan.
@@ -56,6 +62,8 @@ Each loop through the enemy list scales enemy stats up. Progress is saved in `lo
 - `swipe.*`: commit distance, speed→damage curve, buffer time, parry angle tolerance
 - `player.*`: slash timing, dodge window, combo
 - `enemy.*`: parry window, opening and flurry durations, guard
+- `cues.*`: parry/dodge cue on/off, size, position, chevron count/speed, colours, window flash colour, ping, vibrate
+- `tutorial.*`: enabled, slow-mo scale while waiting, max wait, attack hits, wind-up multiplier
 - `fx.*`: particles and trails
 - `progression`, `swords`, `enemies`: attack patterns per titan
 
@@ -70,6 +78,7 @@ src/input.js          low-latency swipe recognizer (pointer events, coalesced)
 src/characters.js     procedural knight + titan models and animation
 src/world.js          arena, lights, fog, braziers
 src/ui.js             title / HUD / victory + shop / defeat / pause screens
+src/cues.js           2D "swipe this way" parry cue (glowing chevrons)
 src/save.js           localStorage save
 scripts/smoke-test.mjs headless test (desktop + mobile, swipes, parry, victory, screenshots)
 .github/workflows/deploy.yml  GitHub Pages deploy on push to main

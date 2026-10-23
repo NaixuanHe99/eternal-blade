@@ -8,6 +8,7 @@ import { SwipeInput } from './input.js';
 import { sfx, unlockAudio, vibrate } from './audio.js';
 import { loadSave, writeSave } from './save.js';
 import { UI } from './ui.js';
+import { ParryCue } from './cues.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 
 // ----------------------------------------------------------------- setup ---
@@ -31,6 +32,7 @@ const playerTrail = new BladeTrail(scene, 0x88aaff);
 const enemyTrail = new BladeTrail(scene, 0xffc040);
 const rings = new Rings(scene);
 const swipeTrail = new SwipeTrail($('swipe'));
+const cue = new ParryCue($('cue'));
 const dmgNums = new DamageNumbers($('dmgLayer'), camera);
 const flashEl = $('flashOverlay');
 let flashAmt = 0, flashColor = '#fff';
@@ -76,11 +78,14 @@ function startFight() {
   equipSwordVisual();
   ui.hud(def.name + (loop ? `  +${loop}` : ''), save);
   state = 'fight';
-  ui.banner('FIGHT!', 900);
+  ui.dodgeCue(null); ui.highlight(null);
+  // tutorial: the hint box replaces the FIGHT! banner so it never overlaps the demo cue
+  if (CONFIG.tutorial.enabled && !save.tutorialDone) { ui.banner('', 0); tutStart(); }
+  else { ui.banner('FIGHT!', 900); TUT.active = false; tutWait(false); ui.hint(null); }
 }
 
 function resume() { state = 'fight'; }
-function toTitle() { state = 'title'; ui.title(); }
+function toTitle() { if (TUT.active) { TUT.active = false; tutWait(false); ui.hint(null); ui.highlight(null); } state = 'title'; ui.title(); }
 
 // ------------------------------------------------------------ helpers ------
 const V = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z);
@@ -125,6 +130,7 @@ function doSlash(sw) {
     const req = PARRY_DIR[e.attack];
     if (sw.x * req.x + sw.y * req.y >= CONFIG.swipe.parryDot) { doParry(sw, dur); return; }
     e.parryLocked = true; // wrong direction inside the window: no second chance this swing
+    if (TUT.active && TUT.waiting && TUT.step === 'parry') tutWait(false);
   }
   player.startSwing(sw, dur);
   player.swing.t = dur * 0.12; // skip the very start so contact comes sooner (feels instant)
@@ -134,6 +140,7 @@ function doSlash(sw) {
 
 function doParry(sw, dur) {
   const e = F.e;
+  if (TUT.active && TUT.step === 'parry') { tutNext('dodge'); ui.hint('漂亮！趁敌人硬直快速连斩', 'Parried! Enemy is staggered — slash away!'); }
   player.startSwing(sw, dur); player.swing.t = dur * CONFIG.player.slashHitAt; // snap blade to the clash point
   F.pending = null;
   e.mode = 'stagger'; e.t = 0; e.dur = CONFIG.enemy.flurryTime; e.queue = []; e.resolved = true;
@@ -144,7 +151,7 @@ function doParry(sw, dur) {
   enemy.hitFlinch(dirW, 1.6);
   screenFlash('#bfe6ff', 0.55);
   F.magic = Math.min(CONFIG.magic.max, F.magic + CONFIG.magic.onParry * stats().magicMul);
-  dmgNums.show(clash, 'PARRY!', 'parry');
+  ui.pop('PARRY! 招架', 'parry');
   ui.banner('', 0);
 }
 
@@ -170,6 +177,7 @@ function applyPlayerHit(sw) {
   dmgNums.show(pos, String(dmg), kind === 'light' ? '' : kind === 'guarded' ? 'guard' : kind);
   F.magic = Math.min(CONFIG.magic.max, F.magic + CONFIG.magic.onHit * (guarded ? 0.5 : 1) * s.magicMul);
   if (F.combo >= 2) ui.combo(F.combo);
+  if (TUT.active && TUT.step === 'attack' && ++TUT.hits >= CONFIG.tutorial.attackHits) tutNext('parry');
   if (guarded && (e.mode === 'idle' || e.mode === 'recover')) {
     e.guardHits++;
     if (e.guardHits >= C.guardBreakHits) { e.guardHits = 0; e.mode = 'stagger'; e.t = 0; e.dur = C.guardBreakStagger; e.queue = []; ui.banner('GUARD BREAK', 700); sfx.clang(1.3); }
@@ -178,6 +186,7 @@ function applyPlayerHit(sw) {
 
 function kill(pos, dirW) {
   const e = F.e; e.mode = 'dead'; e.t = 0;
+  if (TUT.active) tutEnd(false);
   impact('kill', pos, dirW);
   enemy.hitFlinch(dirW, 2.2);
   rings.spawn(V(0, 0.1, enemy.root.position.z), 0xffc070, 6, 0.9);
@@ -190,11 +199,13 @@ function dodge(dir) {
   if (state !== 'fight' || F.php <= 0 || F.dodge || F.hurtT > 0 || F.e.mode === 'dead') return;
   player.swing = null; F.pending = null; F.buffered = null; // dodge cancels a slash
   F.dodge = { dir, t: 0 }; sfx.dodge(); vibrate([8]);
+  if (TUT.active && TUT.step === 'dodge' && TUT.waiting) tutWait(false);
 }
 
 function castMagic() {
   if (state !== 'fight' || F.magic < CONFIG.magic.max || F.e.mode === 'dead' || F.php <= 0) return;
   F.magic = 0;
+  if (TUT.active && TUT.step === 'magic') tutNext('done');
   const chest = enemy.chestWorld();
   bolt.position.set(chest.x, chest.y + 6, chest.z); bolt.visible = true; boltT = 0.35;
   const dmg = Math.round(stats().dmg * CONFIG.magic.damageMul * stats().magicMul);
@@ -222,7 +233,8 @@ holdButton($('btnDodgeL'), () => dodge(-1));
 holdButton($('btnDodgeR'), () => dodge(1));
 holdButton($('btnBlock'), () => { F.blocking = true; }, () => { F.blocking = false; });
 holdButton($('btnMagic'), castMagic);
-holdButton($('btnPause'), () => { if (state === 'fight') { state = 'paused'; ui.pause(); } });
+function pauseGame() { if (state !== 'fight') return; state = 'paused'; cue.set(null, null); ui.dodgeCue(null); ui.pause(); }
+holdButton($('btnPause'), pauseGame);
 const KEYSW = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
 window.addEventListener('keydown', (e) => {
   if (e.repeat) return;
@@ -232,7 +244,7 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'KeyD') dodge(1);
   if (e.code === 'KeyS' || e.code === 'Space') F.blocking = true;
   if (e.code === 'KeyQ' || e.code === 'KeyE') castMagic();
-  if (e.code === 'Escape' && state === 'fight') { state = 'paused'; ui.pause(); }
+  if (e.code === 'Escape' && state === 'fight') pauseGame();
 });
 window.addEventListener('keyup', (e) => { if (e.code === 'KeyS' || e.code === 'Space') F.blocking = false; });
 // stop iOS gesture zoom / double-tap zoom / context menu
@@ -245,8 +257,10 @@ function startAttack(a) {
   const e = F.e; e.attack = a; e.mode = 'windup'; e.t = 0; e.resolved = false; e.parryLocked = false;
   const speed = 1 / (1 + (F.scale - 1) * 0.25);
   e.dur = F.def.windup * speed * (a === 'H' ? 1.45 : 1) * (0.9 + Math.random() * 0.2);
+  if (TUT.active) e.dur *= CONFIG.tutorial.windupMul;
+  e.windowFired = false;
   sfx.windup(a === 'H');
-  ui.telegraph(a);
+  if (TUT.active && TUT.step === 'block') { tutHint('block'); ui.highlight('btnBlock'); tutWait(true); }
 }
 function setMode(m, dur) { const e = F.e; e.mode = m; e.t = 0; e.dur = dur; }
 
@@ -259,8 +273,8 @@ function resolveEnemyImpact() {
     e.outcome = 'evade';
     if (F.dodge.t < C.player.perfectDodgeWindow + 0.0) {
       impact('perfectDodge'); F.magic = Math.min(C.magic.max, F.magic + C.magic.onPerfectDodge * stats().magicMul);
-      dmgNums.show(V(player.root.position.x, 2.2, -0.5), 'PERFECT', 'info');
-    } else dmgNums.show(V(player.root.position.x, 2.2, -0.5), 'DODGE', 'info');
+      dmgNums.show(V(player.root.position.x, 2.2, -0.5), 'PERFECT 完美闪避', 'info');
+    } else dmgNums.show(V(player.root.position.x, 2.2, -0.5), 'DODGE 闪避', 'info');
     if (a === 'H') { sfx.slam(); rig.addTrauma(0.45); rings.spawn(V(0, 0.1, -1.6), 0xff6040, 4, 0.5); }
     return;
   }
@@ -273,7 +287,7 @@ function resolveEnemyImpact() {
     impact('block', shieldPos.clone().add(V(0, 0, -0.3)), V(a === 'R' ? -1 : a === 'L' ? 1 : 0, a === 'O' ? -1 : 0, 0));
     rig.push(V(0, 0, 0.25));
     F.magic = Math.min(C.magic.max, F.magic + C.magic.onBlock * stats().magicMul);
-    dmgNums.show(shieldPos, 'BLOCK', 'guard');
+    ui.pop('BLOCK 格挡', 'block');
     return;
   }
   e.outcome = 'hit';
@@ -290,6 +304,7 @@ function hurtPlayer(amount) {
   screenFlash('#ff2a1a', 0.5);
   dmgNums.show(V(player.root.position.x + 0.2, 2.0, -0.3), '-' + dmg, 'player');
   if (F.php <= 0) {
+    if (TUT.active) tutEnd(false);
     time.slowmo(0.2, 1.2); F.endTimer = 1.8; F.result = 'lose'; ui.banner('YOU HAVE FALLEN', 1800); sfx.defeat();
   }
 }
@@ -298,12 +313,15 @@ function updateEnemyAI(dt) {
   const e = F.e; e.t += dt;
   if (F.result) { if (e.mode !== 'dead' && F.result === 'lose') { e.mode = 'idle'; } return; }
   switch (e.mode) {
-    case 'idle': if (e.t >= e.dur) { e.queue = pickPattern(); startAttack(e.queue.shift()); } break;
+    case 'idle': if (e.t >= e.dur) {
+      const ta = tutAttack();
+      if (ta === false) break;
+      if (ta) { e.queue = []; startAttack(ta); } else { e.queue = pickPattern(); startAttack(e.queue.shift()); }
+    } break;
     case 'windup': if (e.t >= e.dur) { setMode('strike', CONFIG.enemy.strikeTime * (e.attack === 'H' ? 1.25 : 1)); sfx.enemyWhoosh(e.attack === 'H'); } break;
     case 'strike':
-      if (!e.resolved && e.t >= e.dur * 0.5) resolveEnemyImpact();
+      if (!e.resolved && e.t >= e.dur * 0.5) { resolveEnemyImpact(); tutOutcome(e.outcome); }
       if (e.t >= e.dur && e.mode === 'strike') {
-        ui.telegraph(null);
         if (e.queue.length) setMode('recover', CONFIG.enemy.chainGap);
         else if (e.outcome === 'evade' || e.outcome === 'block') { setMode('open', CONFIG.enemy.openingTime); ui.banner('OPENING!', 500); }
         else setMode('recover', CONFIG.enemy.recoverTime);
@@ -315,6 +333,102 @@ function updateEnemyAI(dt) {
   }
 }
 const rand = (a, b) => a + Math.random() * (b - a);
+
+// ------------------------------------------------------------ defence cues -
+// Parryable attack -> chevrons in the direction the PLAYER must swipe.
+// Heavy (unparryable) -> dodge buttons pulse. When the timing window opens the
+// enemy weapon flashes + changes colour, a ring pops and a "ting" plays.
+const DEMO_DIRS = [{ x: 1, y: 0 }, { x: -1, y: 0.35 }, { x: 0.2, y: 1 }];
+function timeToImpact(e) {
+  const sd = CONFIG.enemy.strikeTime * (e.attack === 'H' ? 1.25 : 1);
+  return e.mode === 'windup' ? (e.dur - e.t) + sd * 0.5 : sd * 0.5 - e.t;
+}
+function updateCues() {
+  const C = CONFIG.cues, e = F.e;
+  let parry = null, dodgeP = null;
+  if (!F.result && (e.mode === 'windup' || (e.mode === 'strike' && !e.resolved))) {
+    if (e.attack === 'H') {
+      const tti = timeToImpact(e), nowT = CONFIG.player.dodgeInvuln * 0.9;
+      if (tti <= nowT && !e.windowFired) { e.windowFired = true; onWindowOpen(true); }
+      dodgeP = tti <= nowT ? 'now' : tti <= nowT + C.previewTime + 0.3 ? 'ready' : null;
+      if (F.dodge) dodgeP = null;
+    } else {
+      const winStart = e.dur - CONFIG.enemy.parryWindowBefore, open = e.mode === 'strike' || e.t >= winStart;
+      if (open && !e.windowFired) { e.windowFired = true; onWindowOpen(false); }
+      if (!e.parryLocked && !(TUT.active && TUT.step === 'block')) parry = open ? 'now' : e.t >= winStart - C.previewTime ? 'ready' : null;
+    }
+  }
+  if (!C.showParryCue && !TUT.active) parry = null;
+  if (!C.showDodgeCue && !TUT.active) dodgeP = null;
+  if (!parry && TUT.active && TUT.step === 'attack') cue.set(DEMO_DIRS[Math.floor(performance.now() / 1300) % 3], 'demo', '滑动！SWIPE');
+  else cue.set(parry ? PARRY_DIR[e.attack] : null, parry);
+  ui.dodgeCue(dodgeP);
+}
+function onWindowOpen(danger) {
+  const C = CONFIG.cues;
+  enemy.openWindow(danger ? 0xffb0a0 : C.windowWeaponColor);
+  rings.spawn(enemy.tipW.clone(), danger ? 0xff5040 : C.windowRingColor, 1.5, 0.32, true);
+  if (C.windowPing) sfx.ping(danger);
+  vibrate(C.windowVibrate);
+  if (TUT.active && !danger && TUT.step === 'parry') { tutHint(TUT.tries ? 'parryRetry' : 'parry'); tutWait(true); }
+  if (TUT.active && danger && TUT.step === 'dodge') { tutHint('dodge'); tutWait(true); }
+}
+
+// ------------------------------------------------------------ tutorial -----
+// First fight only (save.tutorialDone). Each step slows the game almost to a stop
+// the first time its cue appears and shows a one-line hint until the player acts.
+const TUT = { active: false, step: null, waiting: false, waitT: 0, hits: 0, issued: false, tries: 0, gap: 0 };
+const TUT_TEXT = {
+  attack: ['在屏幕上滑动挥剑攻击（越快越痛）', 'Swipe across the screen to slash — faster swipes hit harder'],
+  parry: ['顺着箭头方向滑动 → 招架！', 'Swipe the way the arrows flow to PARRY'],
+  parryRetry: ['再试一次：武器变白时，顺着箭头滑', 'Try again: when the weapon flashes white, swipe along the arrows'],
+  dodge: ['红光重击无法招架！点 ⟸ 或 ⟹ 闪避', "Red heavy attack can't be parried — tap a DODGE button"],
+  block: ['按住 🛡 格挡（安全，但消耗盾牌）', 'HOLD the shield button to block (costs shield durability)'],
+  magic: ['能量满了！点 ✦ 释放雷击', 'Magic is full — tap ✦ to cast lightning'],
+  done: ['教程完成！自由战斗吧', 'Tutorial complete — now fight!'],
+};
+const TUT_ATTACK = { parry: 'R', dodge: 'H', block: 'O' };
+function tutStart() { Object.assign(TUT, { active: true, step: 'attack', hits: 0, issued: false, tries: 0, gap: 0 }); tutWait(false); tutHint('attack'); }
+function tutHint(key, skip = true) { const [zh, en] = TUT_TEXT[key]; ui.hint(zh, en, skip); sfx.hint(); }
+function tutWait(on) { TUT.waiting = on; TUT.waitT = 0; time.hold = on ? CONFIG.tutorial.slowScale : 1; }
+function tutNext(step) {
+  tutWait(false); ui.highlight(null);
+  Object.assign(TUT, { step, issued: false, tries: 0, gap: 0.9 });
+  ui.hint(null);
+  if (step === 'magic') { F.magic = CONFIG.magic.max; tutHint('magic'); ui.highlight('btnMagic'); tutWait(true); }
+  if (step === 'done') tutEnd(true);
+}
+function tutEnd(completed) {
+  tutWait(false); ui.highlight(null);
+  TUT.active = false; TUT.step = null;
+  save.tutorialDone = true; writeSave(save);
+  if (completed) { tutHint('done', false); setTimeout(() => { if (!TUT.active) ui.hint(null); }, 2200); } else ui.hint(null);
+}
+function tutAttack() { // null = normal AI, false = hold, 'L'|'R'|... = forced attack
+  if (!TUT.active) return null;
+  if (TUT.step === 'attack' || TUT.step === 'magic' || TUT.gap > 0 || TUT.issued) return false;
+  TUT.issued = true; return TUT_ATTACK[TUT.step];
+}
+function tutOutcome(outcome) {
+  if (!TUT.active) return;
+  const ok = { parry: false, dodge: outcome === 'evade', block: outcome === 'block' }[TUT.step];
+  if (ok === undefined) return;
+  tutWait(false); ui.highlight(null);
+  const next = { parry: 'dodge', dodge: 'block', block: 'magic' }[TUT.step];
+  if (ok || TUT.tries >= 1) { tutNext(next); return; }
+  TUT.tries++; TUT.issued = false; TUT.gap = 0.6; // retry once
+  if (TUT.step !== 'parry') ui.hint('再试一次', 'Try again');
+}
+function tutUpdate(realDt) {
+  if (!TUT.active) return;
+  TUT.gap = Math.max(0, TUT.gap - realDt);
+  if (TUT.waiting) {
+    TUT.waitT += realDt;
+    if (TUT.step === 'block' && F.blocking) { tutWait(false); ui.hint('按住不放…', 'Keep holding…'); }
+    else if (TUT.waitT > CONFIG.tutorial.maxWait && TUT.step !== 'magic') tutWait(false);
+  }
+}
+$('btnSkip').addEventListener('pointerdown', (ev) => { ev.preventDefault(); ev.stopPropagation(); if (TUT.active) { tutEnd(false); sfx.ui(); } });
 
 // ------------------------------------------------------------ fight update -
 function updateFight(dt, realDt) {
@@ -338,6 +452,8 @@ function updateFight(dt, realDt) {
   if (!player.swing && F.buffered && canAct() && !blocking) { const b = F.buffered; F.buffered = null; doSlash(b.sw); }
   if (!player.swing && F.pending) F.pending = null;
   updateEnemyAI(dt);
+  tutUpdate(realDt);
+  updateCues();
   // combo decay
   if (simTime - F.lastHit > P.comboWindow && F.combo) { F.combo = 0; ui.combo(0); }
   if (F.result) {
@@ -374,7 +490,7 @@ function resize() {
   rig.lookAt.set(THREE.MathUtils.lerp(0.1, 0.15, k), THREE.MathUtils.lerp(2.55, 2.8, k), -4);
   camera.updateProjectionMatrix();
   sparks.setScale(h * dpr); chunks.setScale(h * dpr);
-  swipeTrail.resize(w, h, Math.min(dpr, 1.5));
+  swipeTrail.resize(w, h, Math.min(dpr, 1.5)); cue.resize(w, h, Math.min(dpr, 1.5));
   document.body.classList.toggle('portrait', portrait);
 }
 window.addEventListener('resize', resize); window.addEventListener('orientationchange', () => setTimeout(resize, 200));
@@ -411,6 +527,8 @@ function frame(now) {
   flashAmt = Math.max(0, flashAmt - realDt * 3.5);
   flashEl.style.opacity = flashAmt.toFixed(3); flashEl.style.background = flashColor;
   if (playing || state === 'paused') ui.updateHud(F, CONFIG, simTime);
+  if (!playing) { cue.set(null, null); ui.dodgeCue(null); }
+  cue.draw(realDt);
   swipeTrail.draw(performance.now());
   renderer.render(scene, camera);
 }
@@ -422,4 +540,8 @@ window.__game = {
   get state() { return state; }, get fight() { return F; }, save,
   swipe: (x, y, mul = 1.2) => onSwipe({ x, y, speed: 2, mul }), dodge, castMagic, startFight,
   block: (b) => { F.blocking = b; },
+  hold: (k) => { time.hold = k; }, // debug: scale game speed (0 = freeze)
+  forceAttack: (a) => { F.e.queue = []; startAttack(a); },
+  get tutorial() { return { ...TUT }; },
+  skipTutorial: () => { if (TUT.active) tutEnd(false); },
 };

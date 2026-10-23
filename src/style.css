@@ -2,8 +2,8 @@
 html, body { margin: 0; height: 100%; overflow: hidden; background: #000; overscroll-behavior: none; touch-action: none; position: fixed; inset: 0;
   font-family: "Cinzel", "Trajan Pro", Georgia, "Songti SC", "Noto Serif SC", serif; color: #f0e6d0; }
 #app { position: fixed; inset: 0; touch-action: none; }
-#gl, #swipe { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
-#swipe { pointer-events: none; }
+#gl, #swipe, #cue { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+#swipe, #cue { pointer-events: none; }
 #vignette { position: absolute; inset: 0; pointer-events: none; background: radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,.55) 100%); }
 #flashOverlay { position: absolute; inset: 0; pointer-events: none; opacity: 0; background: #fff; mix-blend-mode: screen; }
 #dmgLayer { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
@@ -38,8 +38,33 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #000; oversc
 #combo.pop { animation: comboPop .18s ease-out; }
 @keyframes comboPop { from { transform: scale(1.6); } to { transform: scale(1); } }
 #banner { position: absolute; left: 0; right: 0; top: 38%; text-align: center; font-size: 42px; font-weight: 900; letter-spacing: 6px; opacity: 0; text-shadow: 0 0 18px #48f, 0 2px 0 #000; transition: opacity .3s; }
-#telegraph { position: absolute; left: 50%; top: 44%; width: 120px; height: 120px; margin: -60px; opacity: 0; transition: opacity .1s; font-size: 90px; line-height: 120px; text-align: center; color: #ffcf50; text-shadow: 0 0 16px #f80; }
-#telegraph.H { color: #ff4040; text-shadow: 0 0 18px #f00; } #telegraph.S { color: #60b8ff; text-shadow: 0 0 18px #06f; }
+/* dodge cue (unparryable heavy attack) — sits right above the control row */
+#dodgeCue { position: absolute; left: 50%; bottom: calc(max(14px, env(safe-area-inset-bottom)) + 104px); transform: translateX(-50%); text-align: center; opacity: 0; transition: opacity .12s; color: #ff5a48; text-shadow: 0 0 14px #f00, 0 2px 0 #000; white-space: nowrap; }
+#dodgeCue .ico { font-size: 34px; font-weight: 900; letter-spacing: 6px; } #dodgeCue .ico span { display: inline-block; }
+#dodgeCue .txt { font-size: 22px; font-weight: 900; letter-spacing: 3px; } #dodgeCue .sub { font-size: 11px; opacity: .8; color: #ffd0c8; }
+#dodgeCue.on { opacity: .7; } #dodgeCue.now { opacity: 1; animation: cueBeat .22s infinite alternate; }
+#dodgeCue.now .ico span:first-child { animation: nudgeL .22s infinite alternate; } #dodgeCue.now .ico span:last-child { animation: nudgeR .22s infinite alternate; }
+@keyframes cueBeat { to { transform: translateX(-50%) scale(1.1); } }
+@keyframes nudgeL { to { transform: translateX(-8px); } } @keyframes nudgeR { to { transform: translateX(8px); } }
+.cbtn.cue { border-color: #ff4a3a; box-shadow: 0 0 16px #f22, inset 0 0 12px rgba(255,60,40,.5); }
+.cbtn.cue.now { animation: btnCue .2s infinite alternate; background: rgba(140,20,10,.6); }
+.cbtn.cueBlue { border-color: #7fe0ff; box-shadow: 0 0 16px #3cf; animation: btnCueB .3s infinite alternate; }
+@keyframes btnCue { to { box-shadow: 0 0 30px 6px #f33, inset 0 0 18px rgba(255,80,60,.8); transform: scale(1.08); } }
+@keyframes btnCueB { to { box-shadow: 0 0 30px 6px #4df; transform: scale(1.08); } }
+/* centre pop: PARRY vs BLOCK */
+#pop { position: absolute; left: 0; right: 0; top: 30%; text-align: center; font-weight: 900; opacity: 0; pointer-events: none; white-space: nowrap; }
+#pop.parry { font-size: clamp(40px, 12vw, 72px); letter-spacing: 4px; color: #fff; text-shadow: 0 0 24px #3cf, 0 0 8px #bff, 0 3px 0 #036; animation: popParry .9s cubic-bezier(.2,1.4,.4,1) forwards; }
+#pop.block { top: 56%; font-size: clamp(22px, 6vw, 34px); letter-spacing: 3px; color: #e8d6a8; text-shadow: 0 0 10px #a70, 0 2px 0 #000; animation: popBlock .6s ease-out forwards; }
+@keyframes popParry { 0% { opacity: 0; transform: scale(2.2) rotate(-4deg); } 15% { opacity: 1; transform: scale(.95) rotate(1deg); } 25% { transform: scale(1.05); } 75% { opacity: 1; } 100% { opacity: 0; transform: scale(1.1) translateY(-14px); } }
+@keyframes popBlock { 0% { opacity: 0; transform: translateY(10px); } 20% { opacity: 1; transform: none; } 100% { opacity: 0; transform: translateY(-10px); } }
+/* tutorial hint */
+#hint { position: absolute; left: 50%; top: calc(max(10px, env(safe-area-inset-top)) + 132px); transform: translateX(-50%); width: min(460px, 92vw); text-align: center; padding: 10px 12px 8px; border-radius: 8px;
+  background: rgba(10,8,18,.72); border: 1px solid rgba(255,220,160,.45); box-shadow: 0 0 20px rgba(0,0,0,.6); display: none; pointer-events: none; }
+#hint.on { display: block; animation: hintIn .25s ease-out; }
+#hint .zh { font-size: 18px; font-weight: 900; color: #ffe8b0; line-height: 1.35; } #hint .en { font-size: 12px; opacity: .75; margin-top: 2px; }
+#hint #btnSkip { pointer-events: auto; margin-top: 6px; font: inherit; font-size: 11px; color: #cbb; background: none; border: 1px solid rgba(255,255,255,.25); border-radius: 4px; padding: 3px 8px; }
+@keyframes hintIn { from { opacity: 0; transform: translate(-50%, -8px); } }
+@media (orientation: landscape) and (max-height: 500px) { #hint { top: 52px; width: min(420px, 60vw); } #hint .zh { font-size: 15px; } #dodgeCue { bottom: calc(max(10px, env(safe-area-inset-bottom)) + 80px); } #dodgeCue .ico { font-size: 26px; } #dodgeCue .txt { font-size: 17px; } #pop.block { top: 60%; } }
 
 #controls { position: absolute; bottom: max(14px, env(safe-area-inset-bottom)); left: 0; right: 0; display: flex; justify-content: space-between; align-items: flex-end; padding: 0 max(14px, env(safe-area-inset-left)); pointer-events: none; }
 .cbtn { pointer-events: auto; touch-action: none; width: 74px; height: 74px; border-radius: 50%; border: 2px solid rgba(255,220,160,.55); background: rgba(20,16,28,.55);

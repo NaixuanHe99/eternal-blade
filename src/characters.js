@@ -135,7 +135,10 @@ export class Enemy {
     this.pose = { torsoY: 0, lean: 0, armDir: GUARD_DIR.clone() };
     this.dead = 0; this.time = 0;
     this.tipW = V(); this.baseW = V();
+    this.windowOpen = false; this.windowFlash = 0; this.windowColor = new THREE.Color(0xc8faff);
   }
+  // parry / dodge window opened: weapon flashes and changes colour while it stays open
+  openWindow(color) { this.windowOpen = true; this.windowFlash = 1; this.windowColor.set(color); }
   build(def) {
     this.root.clear(); this.mats = [];
     const M = (c, o = {}) => { const m = new THREE.MeshStandardMaterial({ color: c, roughness: 0.75, metalness: 0.2, ...o }); this.mats.push(m); return m; };
@@ -227,8 +230,15 @@ export class Enemy {
     this.flash = Math.max(0, this.flash - dt * 9);
     this.glow += (glow - this.glow) * Math.min(1, dt * 10);
     const fl = this.flash * this.flash * 0.6; for (const m of this.mats) { m.emissive.setRGB(fl, fl * 0.85, fl * 0.7); }
-    this.weaponMat.emissive.copy(this.glowColor);
-    this.weaponMat.emissiveIntensity = this.glow * (1.2 + Math.sin(this.time * 30) * 0.3) + this.flash;
+    this.windowFlash = Math.max(0, this.windowFlash - dt * 3);
+    if (this.windowOpen && (st.mode === 'windup' || st.mode === 'strike')) {
+      this.weaponMat.emissive.copy(this.windowColor);
+      this.weaponMat.emissiveIntensity = 2.2 + Math.sin(this.time * 40) * 0.5 + this.windowFlash * 4;
+    } else {
+      this.windowOpen = false;
+      this.weaponMat.emissive.copy(this.glowColor);
+      this.weaponMat.emissiveIntensity = this.glow * (1.2 + Math.sin(this.time * 30) * 0.3) + this.flash;
+    }
     this.root.updateMatrixWorld(true);
     this.weaponTip.getWorldPosition(this.tipW); this.weaponBase.getWorldPosition(this.baseW);
   }

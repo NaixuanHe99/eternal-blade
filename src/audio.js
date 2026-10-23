@@ -127,6 +127,12 @@ export const sfx = {
     if (!ctx) return; const t = now();
     [220, 196, 165, 131].forEach((f, i) => tone(t + i * 0.22, 0.8, { type: 'triangle', f0: f, f1: f * 0.98, peak: 0.18, rev: 0.7 }));
   },
+  ping(danger = false) { // parry/dodge window opens — short bright "ting"
+    if (!ctx) return; const t = now();
+    tone(t, 0.18, { type: 'sine', f0: danger ? 1320 : 1760, f1: danger ? 1250 : 1700, peak: 0.16, rev: 0.4 });
+    tone(t, 0.12, { type: 'triangle', f0: danger ? 660 : 2640, peak: 0.06 });
+  },
+  hint() { if (!ctx) return; const t = now(); tone(t, 0.25, { type: 'triangle', f0: 660, f1: 990, peak: 0.12, rev: 0.5 }); },
   ui() { if (!ctx) return; tone(now(), 0.08, { type: 'triangle', f0: 880, f1: 660, peak: 0.12 }); },
 };
 

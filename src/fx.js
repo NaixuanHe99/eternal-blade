@@ -6,6 +6,7 @@ import { CONFIG } from './config.js';
 // ------------------------------------------------------------ time control --
 export const time = {
   hitStop: 0, slowScale: 1, slowTimer: 0, slowDur: 0,
+  hold: 1, // extra multiplier (tutorial "wait for the player" slow-down; debug)
   freeze(t) { this.hitStop = Math.max(this.hitStop, t); },
   slowmo(scale, dur) {
     // keep whichever is more dramatic
@@ -22,7 +23,7 @@ export const time = {
       const ease = k > 0.35 ? 1 : k / 0.35;                         // hold, then ramp back
       s = THREE.MathUtils.lerp(1, this.slowScale, ease);
     }
-    return realDt * s;
+    return realDt * s * this.hold;
   },
   get scale() { return this.hitStop > 0 ? 0 : (this.slowTimer > 0 ? this.slowScale : 1); },
 };

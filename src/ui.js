@@ -4,12 +4,12 @@ import { writeSave, resetSave, DEFAULT_SAVE } from './save.js';
 import { sfx, unlockAudio } from './audio.js';
 
 const $ = (id) => document.getElementById(id);
-const ARROW = { L: '➜', R: '⬅', O: '⬇', S: '➜', H: '⬇' };
 const HELP = `
-  <b>攻击 Attack</b>：在屏幕上滑动挥剑，方向=斩击方向，越快伤害越高；连续滑动打出连击。<br>
-  <b>招架 Parry</b>：敌人挥砍即将落下时，朝<b>相反方向</b>滑动 → 硬直 + 慢动作 + 连斩时间。<br>
-  <b>闪避 Dodge</b> ⟸ ⟹ ：躲开攻击（蓝光横扫 <span style="color:#6af">S</span> 无法闪避）。<br>
-  <b>格挡 Block</b> 🛡 按住：消耗盾牌耐久（红光重击 <span style="color:#f55">H</span> 会击破盾牌，只能闪避）。<br>
+  <b>攻击 Attack</b>：在屏幕上滑动挥剑。滑得越快伤害越高，连续滑动打出连击。<br>
+  <b>招架 Parry</b>（最强防御）：敌人举起武器时，屏幕中央会出现<b>流动的箭头</b>——<b>顺着箭头方向滑动</b>。
+  武器闪成<span style="color:#8ff2ff">青白色</span>并响起“叮”＝<b>现在！</b>成功 → <b>PARRY! 招架</b>，敌人硬直 + 慢动作 + 连斩。<br>
+  <b>闪避 Dodge</b> ⟸ ⟹：<span style="color:#f55">红光重击</span>无法招架/格挡——闪避按钮闪红时点它。（蓝光横扫无法闪避，请招架或格挡。）<br>
+  <b>格挡 Block</b> 🛡 按住：安全但消耗盾牌耐久，不会让敌人硬直。<br>
   <b>魔法 Magic</b> ✦：能量满时释放雷击。<br>
   <span style="opacity:.7">桌面：鼠标拖动挥剑 / 方向键斩击，A/D 闪避，S 或空格格挡，Q 魔法。</span>`;
 
@@ -50,17 +50,29 @@ export class UI {
       this._lastPips = pipsKey;
       $('shieldPips').innerHTML = Array.from({ length: F.shieldMax }, (_, i) => `<div class="pip ${i < F.shield ? '' : 'off'}"></div>`).join('');
     }
-    // telegraph arrow intensity
-    const t = $('telegraph');
-    if (F.e && F.e.mode === 'windup' && CONFIG.enemy.showTelegraphArrow) t.style.opacity = Math.min(1, (F.e.t / F.e.dur) * 1.3).toFixed(2);
-    else if (!(F.e && F.e.mode === 'strike')) t.style.opacity = 0;
   }
 
-  telegraph(a) {
-    const t = $('telegraph');
-    if (!a) { t.style.opacity = 0; return; }
-    t.textContent = ARROW[a] + (a === 'H' ? '!' : ''); t.className = a;
-    t.style.top = a === 'S' ? '62%' : '44%';
+  // unparryable-attack cue: pulse both dodge buttons + icon. phase: null | 'ready' | 'now'
+  dodgeCue(phase) {
+    if (phase === this._dodgePhase) return; this._dodgePhase = phase;
+    const el = $('dodgeCue'); el.classList.toggle('on', !!phase); el.classList.toggle('now', phase === 'now');
+    for (const id of ['btnDodgeL', 'btnDodgeR']) { const b = $(id); b.classList.toggle('cue', !!phase); b.classList.toggle('now', phase === 'now'); }
+  }
+  // highlight a control during the tutorial
+  highlight(id) {
+    for (const b of document.querySelectorAll('.cueBlue')) b.classList.remove('cueBlue');
+    if (id) $(id).classList.add('cueBlue');
+  }
+  // big centre text: 'parry' (PARRY! 招架) or 'block' (BLOCK 格挡)
+  pop(text, cls) {
+    const p = $('pop'); p.textContent = text; p.className = ''; void p.offsetWidth; p.className = cls;
+  }
+  hint(zh, en, skip = true) {
+    const h = $('hint');
+    if (!zh) { h.classList.remove('on'); return; }
+    h.querySelector('.zh').textContent = zh; h.querySelector('.en').textContent = en || '';
+    $('btnSkip').style.display = skip ? '' : 'none';
+    h.classList.remove('on'); void h.offsetWidth; h.classList.add('on');
   }
 
   combo(n) {

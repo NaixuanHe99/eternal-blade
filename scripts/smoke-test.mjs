@@ -46,6 +46,7 @@ async function touchSwipe(page, x0, y0, x1, y1, steps = 6) {
   await page.screenshot({ path: OUT + '01-title-desktop.png' });
   await page.click('#bStart');
   await waitFor(page, () => window.__game.state === 'fight');
+  await page.evaluate(() => window.__game.skipTutorial());
   await sleep(600);
   const hp0 = await page.evaluate(() => window.__game.fight.ehp);
   for (const [a, b, c, d] of [[500, 400, 800, 380], [800, 300, 500, 330], [640, 250, 640, 520], [520, 300, 760, 480]]) { await mouseSwipe(page, a, b, c, d); await sleep(90); }
@@ -83,10 +84,13 @@ async function touchSwipe(page, x0, y0, x1, y1, steps = 6) {
 }
 
 // ---------------- mobile portrait (touch) ----------------
+const MOBILE = { width: 390, height: 844, deviceScaleFactor: 2, isMobile: true, hasTouch: true };
+const freezeShot = async (page, name) => { await page.evaluate(() => window.__game.hold(0)); await sleep(250); await page.screenshot({ path: OUT + name }); await page.evaluate(() => window.__game.hold(1)); };
 {
-  const page = await open({ width: 390, height: 844, deviceScaleFactor: 2, isMobile: true, hasTouch: true }, 'mobile');
+  const page = await open(MOBILE, 'mobile');
   await page.tap('#bStart');
   await waitFor(page, () => window.__game.state === 'fight');
+  await page.evaluate(() => window.__game.skipTutorial());
   await sleep(500);
   const hp0 = await page.evaluate(() => window.__game.fight.ehp);
   for (const [a, b, c, d] of [[100, 400, 300, 380], [300, 350, 90, 420], [200, 300, 200, 520]]) { await touchSwipe(page, a, b, c, d); await sleep(80); }
@@ -97,18 +101,75 @@ async function touchSwipe(page, x0, y0, x1, y1, steps = 6) {
   if (!(hp1 < hp0)) errors.push('touch swipes did not damage the enemy');
   const scrolled = await page.evaluate(() => window.scrollY + document.documentElement.scrollTop);
   if (scrolled !== 0) errors.push('page scrolled during touch');
-  // wait for a wind-up to show the telegraph
-  await waitFor(page, () => { const e = window.__game.fight.e; return e.mode === 'windup' && e.t > e.dur * 0.7; }, 15000);
-  await page.screenshot({ path: OUT + '06-mobile-telegraph.png' });
+  // parry cue ("swipe this way") at the moment the window opens
+  await waitFor(page, () => ['idle', 'recover', 'open'].includes(window.__game.fight.e.mode), 15000);
+  await page.evaluate(() => window.__game.forceAttack('L'));
+  await waitFor(page, () => { const e = window.__game.fight.e; return e.mode === 'windup' && e.windowFired; }, 15000);
+  await freezeShot(page, '06-mobile-parry-cue.png');
+  // real touch swipe in the cue direction (L attack -> swipe left) must parry
+  await touchSwipe(page, 300, 420, 90, 420, 5);
+  const pr = await page.evaluate(() => { window.__game.hold(0); const p = document.getElementById('pop'); p.getAnimations().forEach((an) => { an.pause(); an.currentTime = 300; }); return { mode: window.__game.fight.e.mode, pop: p.className + ':' + p.textContent }; });
+  console.log('mobile touch parry following cue ->', pr);
+  if (pr.mode !== 'stagger') errors.push('touch swipe along the parry cue did not parry');
+  if (!/parry:PARRY/.test(pr.pop)) errors.push('PARRY pop not shown');
+  await sleep(150);
+  await page.screenshot({ path: OUT + '07-mobile-parry-pop.png' });
+  await page.evaluate(() => { document.getElementById('pop').getAnimations().forEach((an) => an.play()); window.__game.hold(1); });
+  // unparryable heavy -> dodge cue
+  await waitFor(page, () => ['idle', 'recover', 'open'].includes(window.__game.fight.e.mode), 15000);
+  await page.evaluate(() => window.__game.forceAttack('H'));
+  await waitFor(page, () => document.getElementById('dodgeCue').classList.contains('now'), 15000);
+  const cueState = await page.evaluate(() => ({ dodgeBtn: document.getElementById('btnDodgeL').classList.contains('cue') }));
+  if (!cueState.dodgeBtn) errors.push('dodge buttons not highlighted for heavy attack');
+  await freezeShot(page, '08-mobile-dodge-cue.png');
+  await page.tap('#btnDodgeR');
+  await sleep(600);
   // landscape
   await page.setViewport({ width: 844, height: 390, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
   await sleep(400);
-  await touchSwipe(page, 300, 200, 600, 180);
-  await sleep(50);
-  await page.screenshot({ path: OUT + '07-mobile-landscape.png' });
+  await waitFor(page, () => ['idle', 'recover', 'open'].includes(window.__game.fight.e.mode), 15000);
+  await page.evaluate(() => window.__game.forceAttack('O'));
+  await waitFor(page, () => { const e = window.__game.fight.e; return e.mode === 'windup' && e.windowFired; }, 15000);
+  await freezeShot(page, '09-mobile-landscape-parry-cue.png');
   // perf sample
   const fps = await page.evaluate(() => new Promise((res) => { let n = 0; const t0 = performance.now(); const f = () => { n++; if (performance.now() - t0 < 2000) requestAnimationFrame(f); else res(n / 2); }; requestAnimationFrame(f); }));
   console.log('fps (headless swiftshader, not representative):', fps);
+  await page.close();
+}
+
+// ---------------- first-fight tutorial (mobile portrait) ----------------
+{
+  const page = await open(MOBILE, 'tutorial');
+  await page.tap('#bStart');
+  await waitFor(page, () => window.__game.state === 'fight' && window.__game.tutorial.active);
+  await sleep(700);
+  await page.screenshot({ path: OUT + '10-tutorial-attack.png' });
+  for (let i = 0; i < 5 && (await page.evaluate(() => window.__game.tutorial.step)) === 'attack'; i++) { await touchSwipe(page, i % 2 ? 300 : 90, 450, i % 2 ? 90 : 300, 430); await sleep(350); }
+  await waitFor(page, () => window.__game.tutorial.step === 'parry' && window.__game.tutorial.waiting, 20000);
+  await sleep(300);
+  await page.screenshot({ path: OUT + '11-tutorial-parry.png' });
+  await touchSwipe(page, 90, 430, 300, 430, 5); // forced 'R' attack -> swipe right
+  await sleep(40);
+  const pm = await page.evaluate(() => window.__game.fight.e.mode);
+  console.log('tutorial parry -> enemy mode:', pm);
+  if (pm !== 'stagger') errors.push('tutorial parry failed');
+  await waitFor(page, () => window.__game.tutorial.step === 'dodge' && window.__game.tutorial.waiting, 25000);
+  await sleep(300);
+  await page.screenshot({ path: OUT + '12-tutorial-dodge.png' });
+  await page.tap('#btnDodgeL');
+  await waitFor(page, () => window.__game.tutorial.step === 'block' && window.__game.tutorial.waiting, 25000);
+  await sleep(200);
+  await page.screenshot({ path: OUT + '13-tutorial-block.png' });
+  const bb = await page.evaluate(() => { const r = document.getElementById('btnBlock').getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; });
+  await page.touchscreen.touchStart(bb[0], bb[1]);
+  await waitFor(page, () => window.__game.tutorial.step === 'magic', 25000);
+  await page.touchscreen.touchEnd();
+  await sleep(300);
+  await page.tap('#btnMagic');
+  await waitFor(page, () => !window.__game.tutorial.active, 10000);
+  const done = await page.evaluate(() => JSON.parse(localStorage.getItem('eternal-blade-save-v1')).tutorialDone);
+  console.log('tutorial completed, saved tutorialDone =', done);
+  if (!done) errors.push('tutorial completion not saved');
   await page.close();
 }
 

@@ -59,7 +59,35 @@ export const CONFIG = {
     idleMin: 0.7, idleMax: 1.5,
     chainGap: 0.28,          // pause between attacks inside a pattern
     flinchStrength: 1.0,
-    showTelegraphArrow: true,
+  },
+
+  // ------------------------------------------------ on-screen defence cues ---
+  // One cue at a time. Parryable attacks -> animated chevrons showing the way the
+  // PLAYER must swipe. Unparryable heavy (red) -> dodge-button pulse + icon.
+  cues: {
+    showParryCue: true,      // set false for "expert mode" (enemy weapon glow only)
+    showDodgeCue: true,
+    previewTime: 0.45,       // cue fades in (dim) this long before the parry window opens
+    lengthFrac: 0.46,        // chevron track length as a fraction of min(screenW, screenH)
+    centerY: 0.47,           // vertical centre of the cue (fraction of screen height)
+    chevrons: 4,             // number of chevrons along the track
+    flowSpeed: 1.6,          // chevron travel speed (tracks per second)
+    readyColor: '#ffd36a',   // cue colour before the window opens
+    nowColor: '#8ff2ff',     // cue colour while the window is open ("NOW")
+    dodgeColor: '#ff4a3a',
+    windowRingColor: 0x9ff4ff, // ring + weapon flash when the parry window opens
+    windowWeaponColor: 0xc8faff,
+    windowPing: true,        // short high "ting" sound when the window opens
+    windowVibrate: [8],      // haptic tick when the window opens
+  },
+
+  // ------------------------------------------------ first-fight tutorial -----
+  tutorial: {
+    enabled: true,           // runs once (stored in the save) — skippable
+    slowScale: 0.04,         // game speed while a tutorial hint is waiting for you
+    maxWait: 8,              // seconds (real time) before a hint gives up and resumes
+    attackHits: 3,           // hits needed to finish the "swipe to attack" step
+    windupMul: 1.6,          // tutorial enemy attacks wind up slower
   },
 
   // ---------------------------------------------- impact / hit-feel table ---
