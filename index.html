@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="theme-color" content="#1a1622" />
+  <title>Eternal Blade 永恒之刃</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Ctext y=%22.9em%22 font-size=%2290%22%3E%E2%9A%94%3C/text%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="./src/style.css" />
+</head>
+<body>
+  <div id="app">
+    <canvas id="gl"></canvas>
+    <canvas id="swipe"></canvas>
+    <div id="vignette"></div>
+    <div id="flashOverlay"></div>
+    <div id="dmgLayer"></div>
+
+    <div id="hud" class="hidden">
+      <div id="enemyBar">
+        <div id="enemyName">—</div>
+        <div class="bar"><div id="enemyHp" class="fill red"></div><div id="enemyHpLag" class="lag"></div></div>
+      </div>
+      <div id="telegraph"></div>
+      <div id="combo"></div>
+      <div id="banner"></div>
+      <div id="playerPanel">
+        <div class="row"><span class="lbl">HP</span><div class="bar small"><div id="playerHp" class="fill green"></div></div></div>
+        <div class="row"><span class="lbl">🛡</span><div id="shieldPips"></div></div>
+        <div class="row"><span class="lbl">✦</span><div class="bar small"><div id="magicBar" class="fill blue"></div></div></div>
+      </div>
+      <div id="controls">
+        <button id="btnDodgeL" class="cbtn" aria-label="dodge left">⟸<small>闪避</small></button>
+        <button id="btnBlock" class="cbtn big" aria-label="block">🛡<small>格挡</small></button>
+        <button id="btnDodgeR" class="cbtn" aria-label="dodge right">⟹<small>闪避</small></button>
+      </div>
+      <button id="btnMagic" class="cbtn magic" aria-label="magic">✦<small>魔法</small></button>
+      <button id="btnPause" aria-label="menu">❚❚</button>
+    </div>
+
+    <div id="screen" class="screen"></div>
+  </div>
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>
