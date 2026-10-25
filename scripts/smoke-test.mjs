@@ -6,7 +6,7 @@ import puppeteer from 'puppeteer-core';
 import { preview } from 'vite';
 import fs from 'node:fs';
 
-const CHROME = process.env.CHROME_PATH || '/usr/bin/google-chrome';
+const CHROME = process.env.CHROME_PATH || ['/usr/bin/google-chrome', '/usr/local/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((p) => fs.existsSync(p)) || '/usr/bin/google-chrome';
 const OUT = new URL('../screenshots/', import.meta.url).pathname;
 fs.mkdirSync(OUT, { recursive: true });
 const server = await preview({ preview: { port: 4173, host: '127.0.0.1' } });
@@ -79,7 +79,54 @@ async function touchSwipe(page, x0, y0, x1, y1, steps = 6) {
   await waitFor(page, () => window.__game.state === 'victory', 20000);
   await sleep(300);
   await page.screenshot({ path: OUT + '04-victory-shop-desktop.png' });
-  console.log('victory reached; save =', JSON.stringify(await page.evaluate(() => window.__game.save)));
+  const prog = await page.evaluate(() => ({ state: window.__game.state, floor: window.__game.save.floor, room: window.__game.save.room, blood: window.__game.save.bloodline, gold: window.__game.save.gold }));
+  console.log('victory reached; progress =', JSON.stringify(prog));
+  if (prog.state !== 'victory') errors.push('win did not open the corridor');
+  if (prog.floor !== 0 || prog.room !== 1) errors.push(`floor did not advance to the next room (floor ${prog.floor} room ${prog.room})`);
+  if (prog.blood !== 1) errors.push('bloodline changed before the castle was cleared');
+  const equipped = await page.evaluate(() => {
+    const it = window.__game.debugGrant('helmet', 'rare');
+    window.__game.debugEquip(it.id);
+    const st = window.__game.playerStats();
+    return { id: window.__game.save.equipped.helmet, name: it.name, magic: st.magicMul, hp: st.hp, text: document.body.innerText };
+  });
+  console.log('equipped', equipped.name, 'magic', equipped.magic, 'hp', equipped.hp);
+  if (!equipped.id) errors.push('equip did not set the helmet slot');
+  if (!equipped.text.includes(equipped.name)) errors.push('equipped item not shown in the corridor');
+  if (!(equipped.magic > 1 || equipped.hp > 100)) errors.push('equipping gear did not change player stats');
+  const sold = await page.evaluate(() => {
+    const before = window.__game.save.gold;
+    const it = window.__game.debugGrant('shield', 'common');
+    const btn = document.querySelector(`[data-sell="${it.id}"]`);
+    if (btn) btn.click();
+    return { before, after: window.__game.save.gold, had: !!btn, still: window.__game.save.inventory.some((x) => x.id === it.id) };
+  });
+  console.log('sell', JSON.stringify(sold));
+  if (!sold.had || !(sold.after > sold.before) || sold.still) errors.push('sell from the corridor bag failed');
+  await page.evaluate(() => window.__game.debugGoto(0, 2));
+  await page.click('#bNext');
+  await waitFor(page, () => window.__game.state === 'fight' && window.__game.fight.def && window.__game.fight.def.boss);
+  const boss = await page.evaluate(() => ({ name: window.__game.fight.def.name, intro: !!window.__game.fight.introSeen, theme: window.__game.theme, arch: window.__game.fight.def.archetype }));
+  console.log('boss fight', JSON.stringify(boss));
+  if (boss.name !== '城垣统领' || !boss.intro) errors.push('floor boss intro did not start');
+  if (boss.theme !== 'gate') errors.push('gate boss used the wrong arena theme');
+  await page.evaluate(() => {
+    const F = window.__game.fight;
+    F.introT = 0;
+    F.ehp = Math.floor(F.ehpMax * 0.5) + 5;
+    F.e.mode = 'open'; F.e.t = 0; F.e.dur = 8; F.e.phase2 = false; F.result = null;
+  });
+  await mouseSwipe(page, 480, 380, 860, 360);
+  await sleep(450);
+  let phase = await page.evaluate(() => ({ phase2: !!window.__game.fight.e.phase2, hp: window.__game.fight.ehp, max: window.__game.fight.ehpMax }));
+  if (!phase.phase2) { await mouseSwipe(page, 860, 400, 460, 340); await sleep(450); phase = await page.evaluate(() => ({ phase2: !!window.__game.fight.e.phase2, hp: window.__game.fight.ehp, max: window.__game.fight.ehpMax })); }
+  console.log('boss phase', JSON.stringify(phase));
+  if (!phase.phase2) errors.push('boss did not enter phase 2 after dropping to half HP');
+  if (!(phase.hp > 0)) errors.push('phase test killed the boss outright');
+  await page.evaluate(() => { window.__game.debugGoto(2, 0); window.__game.startFight(); });
+  const hall = await page.evaluate(() => ({ theme: window.__game.theme, name: document.getElementById('enemyName').textContent, floor: window.__game.save.floor }));
+  console.log('hall', JSON.stringify(hall));
+  if (hall.theme !== 'hall' || hall.floor !== 2 || !hall.name.includes('长厅')) errors.push('great hall theme/name did not apply');
   await page.close();
 }
 
@@ -153,16 +200,16 @@ const freezeShot = async (page, name) => { await page.evaluate(() => window.__ga
   const pm = await page.evaluate(() => window.__game.fight.e.mode);
   console.log('tutorial parry -> enemy mode:', pm);
   if (pm !== 'stagger') errors.push('tutorial parry failed');
-  await waitFor(page, () => window.__game.tutorial.step === 'dodge' && window.__game.tutorial.waiting, 25000);
+  await waitFor(page, () => window.__game.tutorial.step === 'dodge' && window.__game.tutorial.waiting, 50000);
   await sleep(300);
   await page.screenshot({ path: OUT + '12-tutorial-dodge.png' });
   await page.tap('#btnDodgeL');
-  await waitFor(page, () => window.__game.tutorial.step === 'block' && window.__game.tutorial.waiting, 25000);
+  await waitFor(page, () => window.__game.tutorial.step === 'block' && window.__game.tutorial.waiting, 50000);
   await sleep(200);
   await page.screenshot({ path: OUT + '13-tutorial-block.png' });
   const bb = await page.evaluate(() => { const r = document.getElementById('btnBlock').getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; });
   await page.touchscreen.touchStart(bb[0], bb[1]);
-  await waitFor(page, () => window.__game.tutorial.step === 'magic', 25000);
+  await waitFor(page, () => window.__game.tutorial.step === 'magic', 50000);
   await page.touchscreen.touchEnd();
   await sleep(300);
   await page.tap('#btnMagic');

@@ -10,6 +10,8 @@ import { loadSave, writeSave } from './save.js';
 import { UI } from './ui.js';
 import { ParryCue } from './cues.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
+import { currentEnemy, currentFloor, fightScale, peekAdvance } from './progress.js';
+import { rollLoot, sellValue, elementMul, makeItem, SLOTS } from './loot.js';
 
 // ----------------------------------------------------------------- setup ---
 const $ = (id) => document.getElementById(id);
@@ -43,44 +45,98 @@ bolt.visible = false; scene.add(bolt);
 let boltT = 0;
 
 const save = loadSave();
-const ui = new UI(save, { onStart: startFight, onNext: startFight, onRebirth: startFight, onResume: resume, onQuit: toTitle, sword: equipSwordVisual });
+const ui = new UI(save, {
+  onStart: beginFromTitle, onNext: startFight, onRebirth: () => showCorridor({}), onResume: resume, onQuit: toTitle,
+  onRetry: startFight, onRetreat: retreatToGate, gear: equipGearVisual, stats,
+});
 
 // ------------------------------------------------------------ fight state --
 let state = 'title';  // title | fight | over | paused | victory | defeat
 let simTime = 0;
 const F = {}; // current fight
 
-const sword = () => CONFIG.swords.find((s) => s.id === save.equipped) || CONFIG.swords[0];
-function equipSwordVisual() { const s = sword(); player.setSwordColors(s.color, s.glow); playerTrail.setColor(s.glow); }
-equipSwordVisual();
-enemy.build(CONFIG.enemies[save.stage % CONFIG.enemies.length]); // title-screen backdrop
+function equippedGear() {
+  const out = {};
+  for (const slot of SLOTS) {
+    const id = save.equipped[slot];
+    out[slot] = id ? save.inventory.find((it) => it && it.id === id) || null : null;
+  }
+  return out;
+}
+function equipGearVisual() {
+  const g = equippedGear();
+  player.setGearVisual(g);
+  playerTrail.setColor(g.sword ? g.sword.glow : 0x88aaff);
+}
+equipGearVisual();
+presentArena(currentEnemy(save)); // title-screen backdrop
 
 function stats() {
-  const P = CONFIG.player, st = save.stats;
-  return { hp: P.baseHp + st.hp * P.hpPerPoint, dmg: P.baseDamage + st.atk * P.damagePerPoint + sword().damage, shield: P.baseShield + st.shield * P.shieldPerPoint,
-    magicMul: 1 + st.magic * P.magicPerPoint, crit: sword().crit };
+  const P = CONFIG.player, st = save.stats, g = equippedGear();
+  const sum = (k) => SLOTS.reduce((a, slot) => a + ((g[slot] && g[slot][k]) || 0), 0);
+  const shieldBonus = Math.round(((g.shield && g.shield.def) || 0) / 6);
+  return {
+    hp: P.baseHp + st.hp * P.hpPerPoint + sum('hp'),
+    dmg: P.baseDamage + st.atk * P.damagePerPoint + sum('atk'),
+    shield: Math.max(0, P.baseShield + st.shield * P.shieldPerPoint + shieldBonus),
+    magicMul: 1 + st.magic * P.magicPerPoint + sum('magic'),
+    crit: Math.min(0.65, 0.04 + sum('crit')),
+    def: sum('def'),
+    element: (g.sword && g.sword.element) || null,
+  };
+}
+
+function fightTitle() {
+  const f = currentFloor(save);
+  const tag = F.def && F.def.boss ? ' ★' : '';
+  const ph = F.e && F.e.phase2 ? ' · 狂化' : '';
+  return `${f.name} ${save.room + 1}/${f.rooms.length} · ${F.def.name}${tag}${ph}`;
+}
+function presentArena(def) {
+  world.setTheme(currentFloor(save).theme);
+  enemy.build(def || currentEnemy(save));
+}
+function showCorridor(payload) {
+  presentArena(currentEnemy(save));
+  F.e = { mode: 'idle', t: 0, dur: 1, attack: 'O', phase2: false };
+  state = 'victory';
+  ui.victory(payload || {});
+}
+function beginFromTitle() {
+  if (CONFIG.tutorial.enabled && !save.tutorialDone) startFight();
+  else showCorridor({});
+}
+function retreatToGate() {
+  const loss = Math.round(save.gold * (CONFIG.progression.retreatGoldLoss || 0));
+  save.gold = Math.max(0, save.gold - loss);
+  save.floor = 0; save.room = 0;
+  writeSave(save);
+  showCorridor({});
 }
 
 function startFight() {
   unlockAudio();
-  const list = CONFIG.enemies, def = list[save.stage % list.length];
-  const loop = Math.floor(save.stage / list.length);
-  const scale = (1 + loop * CONFIG.progression.loopScale) * (1 + (save.bloodline - 1) * CONFIG.progression.rebirthEnemyScale);
+  const def = currentEnemy(save);
+  const scale = fightScale(save);
   const s = stats();
   Object.assign(F, {
-    def, scale, php: s.hp, phpMax: s.hp, shield: s.shield, shieldMax: s.shield, shieldRegen: 0, magic: 0,
+    def, scale, title: '',
+    php: s.hp, phpMax: s.hp, shield: s.shield, shieldMax: s.shield, shieldRegen: 0, magic: 0,
     ehp: Math.round(def.hp * scale), ehpMax: Math.round(def.hp * scale),
-    e: { mode: 'idle', t: 0, dur: 1.4, queue: [], attack: 'O', resolved: false, parryLocked: false, guardHits: 0, outcome: null },
+    e: { mode: 'idle', t: 0, dur: def.boss ? 0.45 : 1.3, queue: [], attack: 'O', resolved: false, parryLocked: false, guardHits: 0, outcome: null, phase2: false, windowFired: false },
     combo: 0, lastHit: -9, buffered: null, pending: null, dodge: null, blocking: false, endTimer: 0, hurtT: 0,
+    introT: def.boss ? 2.15 : 0, introSeen: !!def.boss, burn: null, result: null,
   });
-  enemy.build(def);
+  F.title = fightTitle();
+  presentArena(def);
   player.offsetX = 0; player.swing = null; player.hurtT = 0;
-  equipSwordVisual();
-  ui.hud(def.name + (loop ? `  +${loop}` : ''), save);
+  equipGearVisual();
+  ui.hud(F.title);
   state = 'fight';
   ui.dodgeCue(null); ui.highlight(null);
   // tutorial: the hint box replaces the FIGHT! banner so it never overlaps the demo cue
   if (CONFIG.tutorial.enabled && !save.tutorialDone) { ui.banner('', 0); tutStart(); }
+  else if (def.boss) { ui.banner(`★ ${def.name}`, 1800); ui.hint(def.intro || '头目', def.en || '', false); TUT.active = false; tutWait(false); }
   else { ui.banner('FIGHT!', 900); TUT.active = false; tutWait(false); ui.hint(null); }
 }
 
@@ -91,7 +147,7 @@ function toTitle() { if (TUT.active) { TUT.active = false; tutWait(false); ui.hi
 const V = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z);
 const PARRY_DIR = { L: { x: -1, y: 0 }, R: { x: 1, y: 0 }, O: { x: 0, y: -1 }, S: { x: -1, y: 0 } };
 const SOUND = { guarded: () => sfx.clang(0.7), light: () => sfx.hit(1), heavy: () => sfx.hit(1.5), crit: () => sfx.crit(), parry: () => sfx.parry(),
-  block: () => sfx.block(), hurt: () => sfx.hurt(), magic: () => sfx.magic(), kill: () => { sfx.crit(); sfx.slam(); }, perfectDodge: () => {} };
+  block: () => sfx.block(), hurt: () => sfx.hurt(), magic: () => sfx.magic(F._spellKind || 'lightning'), kill: () => { sfx.crit(); sfx.slam(); }, perfectDodge: () => {} };
 const SPARK_COLOR = { guarded: new THREE.Color(0.8, 0.85, 1), light: new THREE.Color(1, 0.6, 0.25), heavy: new THREE.Color(1, 0.55, 0.2), crit: new THREE.Color(1, 0.8, 0.3),
   parry: new THREE.Color(0.7, 0.9, 1), block: new THREE.Color(1, 0.8, 0.4), magic: new THREE.Color(0.6, 0.85, 1), kill: new THREE.Color(1, 0.7, 0.3) };
 
@@ -110,7 +166,7 @@ function impact(kind, pos, dirW) {
   (SOUND[kind] || (() => {}))();
 }
 function screenFlash(color, amt) { flashColor = color; flashAmt = Math.max(flashAmt, amt); }
-function canAct() { return state === 'fight' && F.php > 0 && F.e.mode !== 'dead' && F.hurtT <= 0 && !F.dodge; }
+function canAct() { return state === 'fight' && F.php > 0 && F.e.mode !== 'dead' && F.hurtT <= 0 && !F.dodge && !(F.introT > 0); }
 
 // ------------------------------------------------------------ input --------
 function onSwipe(sw) {
@@ -165,16 +221,19 @@ function applyPlayerHit(sw) {
   const comboMul = 1 + (F.combo - 1) * P.comboStep;
   const crit = !guarded && Math.random() < s.crit;
   let kind = guarded ? 'guarded' : crit ? 'crit' : (sw.mul >= CONFIG.swipe.heavySpeedMul || F.combo >= 5) ? 'heavy' : 'light';
-  const dmg = Math.max(1, Math.round(s.dmg * sw.mul * comboMul * stateMul * (crit ? P.critMul : 1) * (0.92 + Math.random() * 0.16)));
+  const em = elementMul(s.element, F.def);
+  const dmg = Math.max(1, Math.round(s.dmg * sw.mul * comboMul * stateMul * (crit ? P.critMul : 1) * (0.92 + Math.random() * 0.16) * em));
+  const tag = em > 1.05 ? ' 弱' : em < 0.95 ? ' 抗' : '';
   // contact point: front of the titan, following the actual blade tip
   const chest = enemy.chestWorld();
   const pos = V(THREE.MathUtils.clamp(player.tip.x * 0.8, -1.3, 1.3), THREE.MathUtils.clamp(player.tip.y + 0.8, 1.6, chest.y + 0.6), chest.z + 0.25 * enemy.root.scale.x);
   const dirW = V(sw.x, -sw.y, 0).normalize();
   F.ehp = Math.max(0, F.ehp - dmg);
-  if (F.ehp <= 0) { kill(pos, dirW); dmgNums.show(pos, String(dmg), 'crit'); return; }
+  if (F.ehp <= 0) { kill(pos, dirW); dmgNums.show(pos, String(dmg) + tag, 'crit'); return; }
+  checkPhase();
   impact(kind, pos, dirW);
   enemy.hitFlinch(dirW, guarded ? 0.25 : kind === 'crit' ? 1.6 : kind === 'heavy' ? 1.2 : 0.8 * CONFIG.enemy.flinchStrength);
-  dmgNums.show(pos, String(dmg), kind === 'light' ? '' : kind === 'guarded' ? 'guard' : kind);
+  dmgNums.show(pos, String(dmg) + tag, kind === 'light' ? '' : kind === 'guarded' ? 'guard' : kind);
   F.magic = Math.min(CONFIG.magic.max, F.magic + CONFIG.magic.onHit * (guarded ? 0.5 : 1) * s.magicMul);
   if (F.combo >= 2) ui.combo(F.combo);
   if (TUT.active && TUT.step === 'attack' && ++TUT.hits >= CONFIG.tutorial.attackHits) tutNext('parry');
@@ -195,28 +254,80 @@ function kill(pos, dirW) {
   ui.banner('VICTORY', 2000);
 }
 
+function mitigate(amount) {
+  const def = stats().def || 0;
+  return amount * Math.max(0.3, 1 - def / (def + 55));
+}
+function checkPhase() {
+  const e = F.e;
+  if (!F.def || !F.def.boss || !e || e.phase2 || F.ehp <= 0 || F.result) return;
+  if (F.ehp > F.ehpMax * 0.5) return;
+  e.phase2 = true;
+  e.mode = 'stagger'; e.t = 0; e.dur = 1.15; e.queue = []; e.resolved = true;
+  F.title = fightTitle();
+  ui.banner('第二阶段', 1100);
+  screenFlash('#ff7840', 0.4);
+  sfx.windup(true);
+  enemy.setPhase(2);
+  rings.spawn(enemy.chestWorld(), 0xff6040, 3.2, 0.45);
+}
 function dodge(dir) {
-  if (state !== 'fight' || F.php <= 0 || F.dodge || F.hurtT > 0 || F.e.mode === 'dead') return;
+  if (state !== 'fight' || F.php <= 0 || F.dodge || F.hurtT > 0 || F.e.mode === 'dead' || F.introT > 0) return;
   player.swing = null; F.pending = null; F.buffered = null; // dodge cancels a slash
   F.dodge = { dir, t: 0 }; sfx.dodge(); vibrate([8]);
   if (TUT.active && TUT.step === 'dodge' && TUT.waiting) tutWait(false);
 }
 
+function cycleSpell(dir = 1) {
+  const order = CONFIG.spellOrder;
+  const i = Math.max(0, order.indexOf(save.spell));
+  save.spell = order[(i + dir + order.length) % order.length];
+  writeSave(save); sfx.ui();
+}
 function castMagic() {
-  if (state !== 'fight' || F.magic < CONFIG.magic.max || F.e.mode === 'dead' || F.php <= 0) return;
-  F.magic = 0;
+  if (state !== 'fight' || F.php <= 0 || !F.e || F.e.mode === 'dead' || F.introT > 0) return;
+  if (TUT.active && TUT.step === 'magic') save.spell = 'lightning';
+  const sp = CONFIG.spells[save.spell] || CONFIG.spells.lightning;
+  if (F.magic < sp.cost) return;
+  F.magic -= sp.cost;
   if (TUT.active && TUT.step === 'magic') tutNext('done');
+  if (sp.heal) {
+    const amt = Math.max(1, Math.round(F.phpMax * sp.heal));
+    F.php = Math.min(F.phpMax, F.php + amt);
+    dmgNums.show(V(player.root.position.x, 1.7, -0.4), '+' + amt, 'info');
+    rings.spawn(V(player.root.position.x, 0.12, player.root.position.z), 0x8dffb0, 2.6, 0.45);
+    screenFlash('#c8ffd8', 0.45);
+    sfx.magic('heal');
+    vibrate([18, 20, 18]);
+    return;
+  }
   const chest = enemy.chestWorld();
-  bolt.position.set(chest.x, chest.y + 6, chest.z); bolt.visible = true; boltT = 0.35;
-  const dmg = Math.round(stats().dmg * CONFIG.magic.damageMul * stats().magicMul);
+  const em = elementMul(sp.element, F.def);
+  const dmg = Math.max(1, Math.round(stats().dmg * (sp.damageMul || CONFIG.magic.damageMul) * stats().magicMul * em));
+  const tag = em > 1.05 ? ' 弱' : em < 0.95 ? ' 抗' : '';
   F.ehp = Math.max(0, F.ehp - dmg);
-  screenFlash('#cfefff', 0.9);
-  rings.spawn(V(chest.x, 0.1, chest.z), 0x9fd8ff, 7, 0.7);
-  dmgNums.show(chest, String(dmg), 'crit');
+  const flash = sp.element === 'fire' ? '#ffb060' : sp.element === 'ice' ? '#d8f6ff' : '#cfefff';
+  screenFlash(flash, 0.9);
+  const ring = sp.element === 'fire' ? 0xff7030 : sp.element === 'ice' ? 0xbff6ff : 0x9fd8ff;
+  rings.spawn(V(chest.x, 0.1, chest.z), ring, 6.5, 0.7);
+  if (sp.element === 'lightning') {
+    bolt.material.color.set(0xbfe8ff);
+    bolt.position.set(chest.x, chest.y + 6, chest.z); bolt.visible = true; boltT = 0.35;
+  } else if (sp.element === 'ice') {
+    sparks.burst(chest, 36, { color: new THREE.Color(0.75, 0.95, 1), dir: V(0, 1, 0), speed: 5.2, size: 0.12, life: 0.6 });
+  } else {
+    sparks.burst(chest, 46, { color: new THREE.Color(1, 0.42, 0.1), dir: V(0, 1, 0), speed: 6.4, size: 0.16, life: 0.55 });
+  }
+  dmgNums.show(chest, String(dmg) + tag, 'crit');
   if (F.ehp <= 0) { kill(chest, V(0, -1, 0)); return; }
+  F._spellKind = sp.element;
   impact('magic', chest, V(0, -1, 0));
   enemy.hitFlinch(V(0, -1, 0), 2);
-  const e = F.e; e.mode = 'stagger'; e.t = 0; e.dur = CONFIG.magic.staggerTime; e.queue = []; e.resolved = true;
+  if (sp.burnTicks) F.burn = { left: sp.burnTicks, dmg: Math.max(1, Math.round(dmg * (sp.burnFrac || 0.2))), t: 0 };
+  const e = F.e;
+  const stag = (sp.stagger || CONFIG.magic.staggerTime) * (em > 1 ? 1.1 : em < 1 ? 0.8 : 1);
+  e.mode = 'stagger'; e.t = 0; e.dur = stag; e.queue = []; e.resolved = true;
+  checkPhase();
 }
 
 new SwipeInput(canvas, {
@@ -233,6 +344,7 @@ holdButton($('btnDodgeL'), () => dodge(-1));
 holdButton($('btnDodgeR'), () => dodge(1));
 holdButton($('btnBlock'), () => { F.blocking = true; }, () => { F.blocking = false; });
 holdButton($('btnMagic'), castMagic);
+holdButton($('btnSpell'), () => cycleSpell(1));
 function pauseGame() { if (state !== 'fight') return; state = 'paused'; cue.set(null, null); ui.dodgeCue(null); ui.pause(); }
 holdButton($('btnPause'), pauseGame);
 const KEYSW = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
@@ -243,7 +355,8 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'KeyA') dodge(-1);
   if (e.code === 'KeyD') dodge(1);
   if (e.code === 'KeyS' || e.code === 'Space') F.blocking = true;
-  if (e.code === 'KeyQ' || e.code === 'KeyE') castMagic();
+  if (e.code === 'KeyQ') castMagic();
+  if (e.code === 'KeyE' && state === 'fight') cycleSpell(1);
   if (e.code === 'Escape' && state === 'fight') pauseGame();
 });
 window.addEventListener('keyup', (e) => { if (e.code === 'KeyS' || e.code === 'Space') F.blocking = false; });
@@ -252,12 +365,16 @@ window.addEventListener('keyup', (e) => { if (e.code === 'KeyS' || e.code === 'S
 document.addEventListener('touchmove', (e) => { if (!e.target.closest('.panel')) e.preventDefault(); }, { passive: false });
 
 // ------------------------------------------------------------ enemy AI -----
-function pickPattern() { const p = F.def.patterns; return [...p[Math.floor(Math.random() * p.length)]]; }
+function pickPattern() {
+  const src = (F.e.phase2 && F.def.patterns2 && F.def.patterns2.length) ? F.def.patterns2 : F.def.patterns;
+  return [...src[Math.floor(Math.random() * src.length)]];
+}
 function startAttack(a) {
   const e = F.e; e.attack = a; e.mode = 'windup'; e.t = 0; e.resolved = false; e.parryLocked = false;
   const speed = 1 / (1 + (F.scale - 1) * 0.25);
   e.dur = F.def.windup * speed * (a === 'H' ? 1.45 : 1) * (0.9 + Math.random() * 0.2);
   if (TUT.active) e.dur *= CONFIG.tutorial.windupMul;
+  if (e.phase2) e.dur *= 0.78;
   e.windowFired = false;
   sfx.windup(a === 'H');
   if (TUT.active && TUT.step === 'block') { tutHint('block'); ui.highlight('btnBlock'); tutWait(true); }
@@ -295,7 +412,7 @@ function resolveEnemyImpact() {
   hurtPlayer(dmgBase);
 }
 function hurtPlayer(amount) {
-  const dmg = Math.round(amount * (0.9 + Math.random() * 0.2));
+  const dmg = Math.max(1, Math.round(mitigate(amount) * (0.9 + Math.random() * 0.2)));
   F.php = Math.max(0, F.php - dmg);
   F.hurtT = CONFIG.player.hurtStun; player.hurtT = CONFIG.player.hurtStun;
   player.swing = null; F.pending = null; F.buffered = null; F.combo = 0;
@@ -310,7 +427,9 @@ function hurtPlayer(amount) {
 }
 
 function updateEnemyAI(dt) {
-  const e = F.e; e.t += dt;
+  const e = F.e;
+  if (F.introT > 0) return;
+  e.t += dt;
   if (F.result) { if (e.mode !== 'dead' && F.result === 'lose') { e.mode = 'idle'; } return; }
   switch (e.mode) {
     case 'idle': if (e.t >= e.dur) {
@@ -445,6 +564,22 @@ function updateFight(dt, realDt) {
   if (CONFIG.player.shieldRegenTime > 0 && F.shield < F.shieldMax) {
     F.shieldRegen += dt; if (F.shieldRegen >= CONFIG.player.shieldRegenTime) { F.shieldRegen = 0; F.shield++; }
   } else F.shieldRegen = 0;
+  if (F.introT > 0) {
+    F.introT -= realDt;
+    if (F.introT <= 0) { F.introT = 0; if (!TUT.active) ui.hint(null); }
+  }
+  if (F.burn && F.burn.left > 0 && !F.result && F.e.mode !== 'dead') {
+    F.burn.t += dt;
+    if (F.burn.t >= 0.55) {
+      F.burn.t = 0; F.burn.left--;
+      const pos = enemy.chestWorld();
+      F.ehp = Math.max(0, F.ehp - F.burn.dmg);
+      sparks.burst(pos, 8, { color: new THREE.Color(1, 0.35, 0.08), dir: V(0, 1, 0), speed: 3, size: 0.1, life: 0.4 });
+      dmgNums.show(pos, String(F.burn.dmg), 'heavy');
+      if (F.ehp <= 0) kill(pos, V(0, -1, 0));
+      else checkPhase();
+    }
+  }
   const blocking = F.blocking && F.shield > 0 && !F.dodge && F.php > 0;
   // slash contact
   if (player.swing && F.pending && !F.pending.done && player.swingProgress >= P.slashHitAt) { F.pending.done = true; applyPlayerHit(F.pending.sw); }
@@ -464,17 +599,38 @@ function updateFight(dt, realDt) {
 }
 
 function endFight() {
+  const defeated = F.def.name;
   if (F.result === 'win') {
     const xp = Math.round(F.def.xp * F.scale), gold = Math.round(F.def.gold * F.scale);
     save.xp += xp; save.gold += gold; save.kills++;
     let levels = 0;
     while (save.xp >= CONFIG.progression.xpToLevel(save.level)) { save.xp -= CONFIG.progression.xpToLevel(save.level); save.level++; levels++; save.points += CONFIG.progression.statPointsPerLevel; }
-    save.stage++;
-    writeSave(save); sfx.victory();
-    state = 'victory'; ui.victory({ xp, gold, levels, enemy: F.def.name });
+    const drop = rollLoot(F.def);
+    let item = null, converted = 0;
+    if (drop) {
+      if (save.inventory.length >= CONFIG.progression.bagMax) { converted = sellValue(drop); save.gold += converted; }
+      else { save.inventory.push(drop); item = drop; }
+    }
+    const adv = peekAdvance(save);
+    if (adv.kind === 'castle') {
+      save.bloodline += 1; save.floor = 0; save.room = 0;
+      const bonusGold = CONFIG.progression.clearGold + save.bloodline * CONFIG.progression.clearGoldPerBlood;
+      save.gold += bonusGold; save.points += 1;
+      writeSave(save); sfx.rebirth();
+      presentArena(currentEnemy(save));
+      F.e = { mode: 'idle', t: 0, dur: 1, attack: 'O', phase2: false };
+      state = 'rebirth'; ui.rebirth({ enemy: defeated, bonusGold });
+    } else {
+      save.floor = adv.floor; save.room = adv.room;
+      writeSave(save); sfx.victory();
+      presentArena(currentEnemy(save));
+      F.e = { mode: 'idle', t: 0, dur: 1, attack: 'O', phase2: false };
+      state = 'victory';
+      ui.victory({ xp, gold, levels, enemy: defeated, item, converted, kind: adv.kind, cleared: adv.cleared || '' });
+    }
   } else {
-    save.bloodline++; save.stage = 0; writeSave(save);
-    state = 'defeat'; ui.defeat({ enemy: F.def.name });
+    writeSave(save);
+    state = 'defeat'; ui.defeat({ enemy: defeated });
   }
   F.result = null;
 }
@@ -502,7 +658,8 @@ function frame(now) {
   requestAnimationFrame(frame);
   const realDt = Math.min(0.05, (now - last) / 1000); last = now;
   const playing = state === 'fight';
-  const dt = playing ? time.step(realDt) : (state === 'title' || state === 'victory' || state === 'defeat' ? realDt * 0.5 : 0);
+  const backdrop = state === 'title' || state === 'victory' || state === 'defeat' || state === 'rebirth';
+  const dt = playing ? time.step(realDt) : (backdrop ? realDt * 0.5 : 0);
   simTime += dt;
   let blocking = false;
   if (playing) blocking = updateFight(dt, realDt);
@@ -543,5 +700,22 @@ window.__game = {
   hold: (k) => { time.hold = k; }, // debug: scale game speed (0 = freeze)
   forceAttack: (a) => { F.e.queue = []; startAttack(a); },
   get tutorial() { return { ...TUT }; },
+  get theme() { return world.themeName; },
+  playerStats: () => stats(),
   skipTutorial: () => { if (TUT.active) tutEnd(false); },
+  debugGrant(slot = 'armor', rarity = 'epic') {
+    const it = makeItem(slot, rarity, () => 0.37);
+    save.inventory.push(it); writeSave(save);
+    if (state === 'victory' || state === 'rebirth') ui.refresh();
+    return it;
+  },
+  debugEquip(id) {
+    const it = save.inventory.find((x) => x.id === id);
+    if (!it) return null;
+    save.equipped[it.slot] = it.id;
+    writeSave(save); equipGearVisual();
+    if (state === 'victory' || state === 'rebirth') ui.refresh();
+    return { ...save.equipped };
+  },
+  debugGoto(floor, room) { save.floor = floor; save.room = room; writeSave(save); return { floor: save.floor, room: save.room, enemy: currentEnemy(save).name }; },
 };

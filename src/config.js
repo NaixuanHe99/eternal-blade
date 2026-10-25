@@ -129,28 +129,136 @@ export const CONFIG = {
   progression: {
     xpToLevel: (lvl) => Math.round(60 * Math.pow(lvl, 1.35)),
     statPointsPerLevel: 2,
-    rebirthEnemyScale: 0.12, // each bloodline makes enemies +12% tougher
-    loopScale: 0.35,         // after beating every enemy, they come back +35%
+    rebirthEnemyScale: 0.12, // each bloodline (full castle clear) makes enemies +12% tougher
+    floorScale: 0.16,        // each floor deeper
+    roomScale: 0.05,         // each room along the floor
+    retreatGoldLoss: 0.15,   // dying and retreating to the gate drops this fraction of gold
+    clearGold: 80,           // bonus gold on bloodline rebirth
+    clearGoldPerBlood: 30,
+    bagMax: 28,
   },
 
-  swords: [
-    { id: 'iron',    name: '铁剑 Iron Blade',       damage: 0,  crit: 0.05, price: 0,    color: 0xc8ccd4, glow: 0x88aaff },
-    { id: 'steel',   name: '精钢剑 Tempered Steel',  damage: 5,  crit: 0.08, price: 120,  color: 0xe4e8f0, glow: 0xaad4ff },
-    { id: 'ember',   name: '余烬之刃 Emberbrand',    damage: 11, crit: 0.12, price: 320,  color: 0xff8a4a, glow: 0xff5a1a },
-    { id: 'frost',   name: '霜牙 Frostfang',         damage: 18, crit: 0.16, price: 650,  color: 0x9fe6ff, glow: 0x40c8ff },
-    { id: 'eclipse', name: '蚀月 Eclipse',           damage: 28, crit: 0.22, price: 1200, color: 0xb98cff, glow: 0xa040ff },
-  ],
+  // God-powers. Lightning keeps the old full-meter ultimate; cheaper spells spend part of the bar.
+  // Element ids match enemy weak / resist and gear elements.
+  spells: {
+    lightning: { name: '雷击', en: 'Lightning', glyph: '⚡', cost: 100, element: 'lightning', damageMul: 4.0, stagger: 2.2 },
+    ice:       { name: '霜缚', en: 'Ice',       glyph: '❄', cost: 80,  element: 'ice',       damageMul: 2.6, stagger: 3.15 },
+    fire:      { name: '炎爆', en: 'Fire',      glyph: '🔥', cost: 70,  element: 'fire',      damageMul: 3.0, stagger: 1.35, burnTicks: 3, burnFrac: 0.2 },
+    heal:      { name: '愈光', en: 'Heal',      glyph: '✚', cost: 45,  element: 'heal',      damageMul: 0,   stagger: 0, heal: 0.34 },
+  },
+  spellOrder: ['lightning', 'ice', 'fire', 'heal'],
 
   // attack types: L = swing from player's left→right, R = right→left, O = overhead,
   // S = low sweep (cannot dodge: block/parry), H = heavy slam (cannot block or parry: dodge!)
-  enemies: [
-    { name: '石像巨人 Stone Brute',    hp: 160, damage: 14, windup: 0.95, scale: 1.0, color: 0x8a8378, eye: 0xffa040, xp: 50, gold: 70,
-      patterns: [['O'], ['L'], ['R'], ['L', 'R']] },
-    { name: '铁甲泰坦 Iron Titan',     hp: 260, damage: 18, windup: 0.85, scale: 1.12, color: 0x5d6470, eye: 0x60c0ff, xp: 85, gold: 120,
-      patterns: [['O'], ['L', 'R'], ['R', 'L'], ['S'], ['H']] },
-    { name: '熔岩魔像 Magma Golem',    hp: 380, damage: 22, windup: 0.75, scale: 1.2, color: 0x4a2a22, eye: 0xff4a10, xp: 130, gold: 190,
-      patterns: [['L', 'R', 'O'], ['S', 'O'], ['H'], ['R', 'R'], ['O', 'H']] },
-    { name: '暗影君王 Shadow King',    hp: 520, damage: 27, windup: 0.66, scale: 1.3, color: 0x2a2436, eye: 0xc060ff, xp: 200, gold: 300,
-      patterns: [['L', 'R', 'L'], ['O', 'S'], ['H', 'O'], ['R', 'L', 'H'], ['S', 'S', 'O']] },
+  // Archetypes pick a procedural silhouette in characters.js. Original names only.
+  enemies: {
+    spear_guard: {
+      name: '城门矛卫', en: 'Gate Spearman', archetype: 'spear',
+      hp: 145, damage: 13, windup: 0.98, scale: 1.02, color: 0x6e675c, eye: 0xffc060,
+      xp: 42, gold: 50, drop: 0.42, weak: 'lightning', resist: null,
+      patterns: [['O'], ['L'], ['O', 'R'], ['S']],
+    },
+    ash_sentry: {
+      name: '灰烬剑哨', en: 'Ash Sentry', archetype: 'warden',
+      hp: 175, damage: 15, windup: 0.9, scale: 1.04, color: 0x8a8378, eye: 0xffa040,
+      xp: 50, gold: 58, drop: 0.42, weak: 'ice', resist: 'fire',
+      patterns: [['L'], ['R'], ['L', 'R'], ['O'], ['R', 'L']],
+    },
+    gate_marshal: {
+      name: '城垣统领', en: 'Rampart Marshal', archetype: 'knight', boss: true,
+      hp: 340, damage: 18, windup: 0.86, scale: 1.16, color: 0x4a5568, eye: 0xffe080,
+      xp: 120, gold: 150, drop: 1, minRarity: 'rare', weak: 'lightning', resist: 'fire',
+      intro: '统领举起长剑，闸门在他身后合拢。',
+      patterns: [['L', 'R'], ['O'], ['S'], ['H'], ['R', 'O']],
+      patterns2: [['H', 'L'], ['S', 'S'], ['O', 'H'], ['L', 'R', 'O']],
+    },
+    hound: {
+      name: '裂喉猎犬', en: 'Riven Hound', archetype: 'hound',
+      hp: 155, damage: 14, windup: 0.7, scale: 0.96, color: 0x5a4638, eye: 0xff6030,
+      xp: 54, gold: 62, drop: 0.4, weak: 'fire', resist: 'ice',
+      patterns: [['L', 'R'], ['S'], ['L'], ['R', 'L'], ['S', 'L']],
+    },
+    vineguard: {
+      name: '藤甲庭卫', en: 'Vine Warden', archetype: 'warden',
+      hp: 220, damage: 16, windup: 0.84, scale: 1.1, color: 0x3d5a3a, eye: 0x9dff6a,
+      xp: 68, gold: 76, drop: 0.44, weak: 'fire', resist: 'ice',
+      patterns: [['S'], ['L', 'O'], ['R'], ['S', 'L'], ['O', 'R']],
+    },
+    court_colossus: {
+      name: '中庭巨像', en: 'Court Colossus', archetype: 'golem', boss: true,
+      hp: 480, damage: 22, windup: 1.02, scale: 1.28, color: 0x6a6458, eye: 0xffe080,
+      xp: 170, gold: 210, drop: 1, minRarity: 'rare', weak: 'ice', resist: 'lightning',
+      intro: '石块拼成的巨像从庭院中央站起。',
+      patterns: [['O'], ['H'], ['S', 'O'], ['L', 'R'], ['O', 'H']],
+      patterns2: [['H', 'H'], ['O', 'S', 'H'], ['S', 'O'], ['H', 'L']],
+    },
+    hall_knight: {
+      name: '长厅骑士', en: 'Hall Knight', archetype: 'knight',
+      hp: 250, damage: 18, windup: 0.78, scale: 1.06, color: 0x3e4a62, eye: 0x80c0ff,
+      xp: 82, gold: 92, drop: 0.46, weak: 'fire', resist: null,
+      patterns: [['L', 'R'], ['O', 'L'], ['S'], ['R', 'O'], ['L', 'S']],
+    },
+    chanter: {
+      name: '灰烛咏者', en: 'Ash Chanter', archetype: 'chanter',
+      hp: 210, damage: 17, windup: 0.82, scale: 1.02, color: 0x3a3050, eye: 0xc080ff,
+      xp: 88, gold: 100, drop: 0.5, weak: 'lightning', resist: 'ice',
+      patterns: [['O'], ['S', 'O'], ['L'], ['R', 'O'], ['O', 'L']],
+    },
+    shade: {
+      name: '影刃侍从', en: 'Shade Blade', archetype: 'shade',
+      hp: 200, damage: 20, windup: 0.66, scale: 1.0, color: 0x241c30, eye: 0xd060ff,
+      xp: 94, gold: 108, drop: 0.46, weak: 'fire', resist: 'ice',
+      patterns: [['L', 'R', 'L'], ['R', 'L'], ['S'], ['H'], ['L', 'H']],
+    },
+    hall_keeper: {
+      name: '长厅守印者', en: 'Hall Keeper', archetype: 'chanter', boss: true,
+      hp: 540, damage: 24, windup: 0.76, scale: 1.22, color: 0x2a2040, eye: 0xffd060,
+      xp: 200, gold: 250, drop: 1, minRarity: 'epic', weak: 'fire', resist: 'ice',
+      intro: '守印者抬起法杖，厅内烛火同时低下。',
+      patterns: [['O', 'S'], ['L', 'R'], ['H'], ['S', 'O'], ['O', 'L']],
+      patterns2: [['H', 'O'], ['S', 'S', 'L'], ['O', 'H', 'R'], ['H', 'S']],
+    },
+    throne_shade: {
+      name: '王座影卫', en: 'Throne Shade', archetype: 'shade',
+      hp: 240, damage: 22, windup: 0.62, scale: 1.06, color: 0x1a1424, eye: 0xff4060,
+      xp: 110, gold: 130, drop: 0.52, weak: 'lightning', resist: 'fire',
+      patterns: [['L', 'R'], ['H'], ['S', 'L'], ['R', 'R'], ['L', 'H']],
+    },
+    cinder_golem: {
+      name: '烬核石卫', en: 'Cinder Ward', archetype: 'golem',
+      hp: 320, damage: 23, windup: 0.88, scale: 1.16, color: 0x4a2a22, eye: 0xff4a10,
+      xp: 120, gold: 140, drop: 0.52, weak: 'ice', resist: 'fire',
+      patterns: [['O', 'H'], ['S'], ['H'], ['L', 'O'], ['O', 'S']],
+    },
+    sovereign: {
+      name: '灰冠君王', en: 'Ashcrown Sovereign', archetype: 'sovereign', boss: true,
+      hp: 720, damage: 28, windup: 0.7, scale: 1.32, color: 0x2c2428, eye: 0xffd24a,
+      xp: 300, gold: 380, drop: 1, minRarity: 'epic', weak: 'ice', resist: 'fire',
+      intro: '灰冠君王从王座站起。击败他，血脉将进入下一代。',
+      patterns: [['L', 'R', 'O'], ['H'], ['S', 'O'], ['R', 'L', 'H'], ['O', 'S']],
+      patterns2: [['H', 'H'], ['S', 'O', 'H'], ['L', 'R', 'L', 'H'], ['O', 'S', 'H']],
+    },
+  },
+
+  // Castle route. Each floor: several regular fights, then a floor boss.
+  floors: [
+    { id: 'gate', name: '外城门', en: 'Outer Gate', theme: 'gate',
+      blurb: '生锈的闸门与冷风。矛卫、剑哨，然后是城垣统领。',
+      rooms: ['spear_guard', 'ash_sentry', 'gate_marshal'] },
+    { id: 'court', name: '中庭', en: 'Courtyard', theme: 'court',
+      blurb: '露天石庭，藤蔓爬上残柱。猎犬与藤甲之后，巨像醒来。',
+      rooms: ['hound', 'vineguard', 'court_colossus'] },
+    { id: 'hall', name: '长厅', en: 'Great Hall', theme: 'hall',
+      blurb: '烛火长廊。骑士、咏者与影刃守着厅印。',
+      rooms: ['hall_knight', 'chanter', 'shade', 'hall_keeper'] },
+    { id: 'throne', name: '王座', en: 'Throne', theme: 'throne',
+      blurb: '红雾与金座。影卫、烬核，最后是灰冠君王。',
+      rooms: ['throne_shade', 'cinder_golem', 'sovereign'] },
   ],
 };
+
+export const RARITIES = ['common', 'uncommon', 'rare', 'epic', 'legendary'];
+export const RARITY_LABEL = { common: '普通', uncommon: '优良', rare: '稀有', epic: '史诗', legendary: '传说' };
+export const RARITY_COLOR = { common: '#c8c8d0', uncommon: '#5dcc6a', rare: '#4aa3ff', epic: '#c06bff', legendary: '#ffb020' };
+export const SLOT_LABEL = { sword: '剑', shield: '盾', armor: '甲', helmet: '盔' };
+export const ELEMENT_LABEL = { fire: '火', ice: '冰', lightning: '雷', heal: '愈' };

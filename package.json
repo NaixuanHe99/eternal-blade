@@ -6,7 +6,7 @@
     "dev": "vite --host",
     "build": "vite build",
     "preview": "vite preview --host",
-    "test": "node scripts/smoke-test.mjs"
+    "test": "node scripts/logic-test.mjs && node scripts/smoke-test.mjs"
   },
   "keywords": [],
   "author": "",
