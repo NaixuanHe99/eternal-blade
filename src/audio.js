@@ -112,12 +112,33 @@ export const sfx = {
     noise(t, 0.6, { type: 'lowpass', f0: 600, f1: 60, peak: 0.8, rev: 0.5 });
   },
   dodge() { if (!ctx) return; noise(now(), 0.18, { f0: 900, f1: 300, q: 1, peak: 0.16, a: 0.02 }); },
-  magic() {
+  magic(kind = 'lightning') {
     if (!ctx) return; const t = now();
+    if (kind === 'heal') {
+      tone(t, 0.45, { type: 'sine', f0: 520, f1: 880, peak: 0.18, rev: 0.5 });
+      tone(t + 0.08, 0.5, { type: 'triangle', f0: 660, f1: 990, peak: 0.12, rev: 0.4 });
+      return;
+    }
+    if (kind === 'ice') {
+      noise(t, 0.2, { type: 'highpass', f0: 3000, f1: 6000, peak: 0.25 });
+      tone(t, 0.7, { type: 'sine', f0: 1400, f1: 420, peak: 0.16, rev: 0.6 });
+      tone(t, 0.5, { f0: 220, f1: 70, peak: 0.45 });
+      return;
+    }
+    if (kind === 'fire') {
+      noise(t, 0.45, { type: 'lowpass', f0: 400, f1: 80, peak: 0.7, rev: 0.4 });
+      noise(t, 0.25, { type: 'bandpass', f0: 900, f1: 1800, q: 0.7, peak: 0.35 });
+      tone(t, 0.4, { f0: 90, f1: 40, peak: 0.6 });
+      return;
+    }
     noise(t, 0.08, { type: 'highpass', f0: 5000, peak: 0.8 });
     tone(t, 1.1, { type: 'sawtooth', f0: 1200, f1: 40, peak: 0.25, rev: 0.8 });
     tone(t, 0.9, { f0: 60, f1: 22, peak: 1.0 });
     noise(t + 0.03, 1.2, { type: 'lowpass', f0: 3000, f1: 80, peak: 0.7, rev: 0.9 });
+  },
+  rebirth() {
+    if (!ctx) return; const t = now();
+    [196, 247, 294, 392, 494].forEach((f, i) => tone(t + i * 0.14, 0.7, { type: 'triangle', f0: f, peak: 0.18, rev: 0.7 }));
   },
   victory() {
     if (!ctx) return; const t = now();

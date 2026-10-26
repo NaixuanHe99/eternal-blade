@@ -22,6 +22,7 @@
     <div id="hud" class="hidden">
       <div id="enemyBar">
         <div id="enemyName">—</div>
+        <div id="enemySub"></div>
         <div class="bar"><div id="enemyHp" class="fill red"></div><div id="enemyHpLag" class="lag"></div></div>
       </div>
       <div id="dodgeCue"><div class="ico"><span>⟸</span>⚠<span>⟹</span></div><div class="txt">闪避！DODGE</div><div class="sub">重击无法招架 · can't parry</div></div>
@@ -39,7 +40,8 @@
         <button id="btnBlock" class="cbtn big" aria-label="block">🛡<small>格挡</small></button>
         <button id="btnDodgeR" class="cbtn" aria-label="dodge right">⟹<small>闪避</small></button>
       </div>
-      <button id="btnMagic" class="cbtn magic" aria-label="magic">✦<small>魔法</small></button>
+      <button id="btnSpell" class="cbtn spellcycle" aria-label="switch spell">▸<small>切换</small></button>
+      <button id="btnMagic" class="cbtn magic" aria-label="magic"><span id="magicGlyph">⚡</span><small id="magicLbl">雷击</small></button>
       <button id="btnPause" aria-label="menu">❚❚</button>
     </div>
 

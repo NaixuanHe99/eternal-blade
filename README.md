@@ -28,7 +28,7 @@ npm test           # build first; headless Chrome smoke test + screenshots → s
 | Parry 招架 | Swipe **the way the glowing chevrons flow**. The cue only appears when the attack can be parried: gold = get ready (准备招架), cyan pulsing + "ting" = **NOW** (招架！). A clean parry pops **PARRY! 招架**, staggers the enemy, triggers slow-mo and opens a flurry window. | same |
 | Dodge 闪避 | ⟸ / ⟹ buttons. A late dodge counts as a *perfect dodge* (slow-mo). | A / D |
 | Block 格挡 | Hold 🛡️. This uses shield durability and shows **BLOCK 格挡**. It is safer than a parry but gives no opening. | S / Space |
-| Magic 魔法 | ✦ button when the meter is full | Q / E |
+| Magic 法术 | ▸ cycles 雷击 / 霜缚 / 炎爆 / 愈光, then ✦ casts if you have enough mana. Lightning still costs a full bar. | Q casts, E cycles |
 | Pause | ❚❚ | Esc |
 
 Enemy attack types: left / right / overhead are dodgeable, blockable and parryable.
@@ -41,9 +41,13 @@ Enemy attack types: left / right / overhead are dodgeable, blockable and parryab
 - **Tutorial 教程**: runs on the first fight only (`tutorialDone` in the save) and can be skipped. It covers swipe to attack → parry as shown → dodge buttons → hold shield → magic. The first time each cue appears, the game drops into slow-mo with a one-line hint (Chinese + English) until you act.
 
 ## Loop 流程
-Fight → win → XP / gold / stat points → spend points, buy or equip swords → next, tougher titan.
-If you die you **rebirth** (转生): bloodline +1, back to the first titan, and you keep your level, stats and swords.
-Each loop through the enemy list scales enemy stats up. Progress is saved in `localStorage`.
+The castle is four floors — **外城门 → 中庭 → 长厅 → 王座**. Each floor is a short run of regular fights and then a floor boss (intro line, then a phase 2 at half HP). Between fights a corridor screen shows the route, the next opponent, stat points, and your bag.
+
+Win a fight → XP, gold, and a chance of gear (bosses always drop, and drop higher rarities). Slots are **剑 / 盾 / 甲 / 盔**, rarities **普通 → 传说**, with ATK / DEF / HP / Crit / Magic and sometimes an element. Equip or sell from the corridor. Everything persists in `localStorage`.
+
+Clearing the throne (**灰冠君王**) is a **血脉轮回**: bloodline +1, back to the outer gate, level and gear kept, enemies scale up. Dying does **not** raise the bloodline — retry the same fight, or retreat to the gate and lose a little gold.
+
+Some enemies are weak or resistant to 火 / 冰 / 雷. Spells: 雷击 (full bar, heavy stagger), 霜缚 (long stagger), 炎爆 (burn), 愈光 (heal).
 
 ## Hit feel 打击手感
 - **Hit-stop** freeze frames scale with the hit: guarded < light < heavy < crit < parry < kill.
@@ -65,22 +69,25 @@ Each loop through the enemy list scales enemy stats up. Progress is saved in `lo
 - `cues.*`: parry/dodge cue on/off, size, position, chevron count/speed, colours, window flash colour, ping, vibrate
 - `tutorial.*`: enabled, slow-mo scale while waiting, max wait, attack hits, wind-up multiplier
 - `fx.*`: particles and trails
-- `progression`, `swords`, `enemies`: attack patterns per titan
+- `progression`, `spells`, `floors`, `enemies`: castle route, attack patterns, elements
 
 ## Structure 结构
 ```
 index.html            canvases + HUD + buttons
 src/main.js           renderer, game state machine, combat resolution, enemy AI, resize, debug hook (window.__game)
-src/config.js         ALL tunable numbers (hit feel, timing, balance, swords, enemies)
+src/config.js         ALL tunable numbers (hit feel, timing, balance, floors, enemies, spells)
+src/progress.js       floor / room advance and enemy scaling
+src/loot.js           rarity rolls, gear stats, sell prices, element multipliers
 src/fx.js             time control (hit-stop/slow-mo), camera rig, particles, blade/swipe trails, damage numbers, rings
 src/audio.js          procedural WebAudio SFX + haptics
 src/input.js          low-latency swipe recognizer (pointer events, coalesced)
-src/characters.js     procedural knight + titan models and animation
-src/world.js          arena, lights, fog, braziers
-src/ui.js             title / HUD / victory + shop / defeat / pause screens
+src/characters.js     procedural knight + 8 enemy silhouettes
+src/world.js          arena themes per floor (gate, court, hall, throne)
+src/ui.js             title / HUD / corridor loot & equip / defeat / bloodline / pause
 src/cues.js           2D "swipe this way" parry cue (glowing chevrons)
-src/save.js           localStorage save
-scripts/smoke-test.mjs headless test (desktop + mobile, swipes, parry, victory, screenshots)
+src/save.js           localStorage save (migrates the old sword shop)
+scripts/logic-test.mjs  castle, loot and silhouette checks (no browser)
+scripts/smoke-test.mjs headless test (desktop + mobile, swipes, parry, floor advance, equip, boss, screenshots)
 .github/workflows/deploy.yml  GitHub Pages deploy on push to main
 ```
 
